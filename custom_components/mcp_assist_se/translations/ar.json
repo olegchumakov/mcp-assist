@@ -132,7 +132,7 @@
   },
   "entity": {
     "conversation": {
-      "mcp_assist": {
+      "mcp_assist_se": {
         "name": "{profile_name}"
       }
     }

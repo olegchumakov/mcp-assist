@@ -36,7 +36,7 @@ KEEPALIVE_INTERVAL = 30
 RECONNECT_DELAY = 5
 
 # Storage
-STORAGE_KEY = "mcp_assist.openclaw_device"
+STORAGE_KEY = "mcp_assist_se_openclaw_storage"
 STORAGE_VERSION = 1
 
 

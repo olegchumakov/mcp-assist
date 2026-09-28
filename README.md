@@ -1,3 +1,4 @@
+> **MCP Assist SE** — fork with the SearXNG search provider (upstream PR #51 merged) and renamed domain ``mcp_assist_se`` so it can coexist with upstream MCP Assist.
 # MCP Assist for Home Assistant
 
 A Home Assistant conversation agent that uses MCP (Model Context Protocol) for efficient entity discovery, achieving **95% token reduction** compared to traditional methods. Works with LM Studio, llama.cpp, Ollama, OpenAI, Google Gemini, Anthropic Claude, and OpenRouter.
@@ -79,7 +80,7 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
 3. Restart Home Assistant
 
 ### Option B: Manual Installation
-1. Copy the `custom_components/mcp_assist` folder to your Home Assistant `custom_components` directory
+1. Copy the `custom_components/mcp_assist_se` folder to your Home Assistant `custom_components` directory
 2. Restart Home Assistant
 
 ## Configuration

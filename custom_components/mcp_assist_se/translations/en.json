@@ -48,11 +48,11 @@
           "response_mode": "Response Mode",
           "follow_up_phrases": "Follow-up Phrases",
           "end_words": "End Conversation Words",
-          "clean_responses": "Clean Responses for Voice Output",
           "timeout": "Response Time Out",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
+          "clean_responses": "Clean Responses for Voice Output",
           "openclaw_session_key": "Session Key / Session ID",
           "hermes_session_key": "Memory Session Key"
         },
@@ -69,7 +69,8 @@
           "search_provider": "Web Search",
           "brave_api_key": "Brave Search API Key",
           "allowed_ips": "Additional Allowed IPs/Ranges",
-          "enable_gap_filling": "Enable Smart Entity Index"
+          "enable_gap_filling": "Enable Smart Entity Index",
+          "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
         }
       }
     },
@@ -111,11 +112,11 @@
           "response_mode": "Response Mode",
           "follow_up_phrases": "Follow-up Phrases",
           "end_words": "End Conversation Words",
-          "clean_responses": "Clean Responses for Voice Output",
           "timeout": "Response Time Out",
           "debug_mode": "Debug Mode",
           "ollama_keep_alive": "Ollama Keep Alive",
           "ollama_num_ctx": "Ollama Context Window",
+          "clean_responses": "Clean Responses for Voice Output",
           "openclaw_host": "Gateway Host",
           "openclaw_port": "Gateway Port",
           "openclaw_token": "Gateway Token",
@@ -145,7 +146,7 @@
   },
   "entity": {
     "conversation": {
-      "mcp_assist": {
+      "mcp_assist_se": {
         "name": "{profile_name}"
       }
     }

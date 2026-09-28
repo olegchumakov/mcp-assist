@@ -1,7 +1,7 @@
 """Constants for the MCP Assist integration."""
 
-DOMAIN = "mcp_assist"
-SYSTEM_ENTRY_UNIQUE_ID = "mcp_assist_system_settings"
+DOMAIN = "mcp_assist_se"
+SYSTEM_ENTRY_UNIQUE_ID = "mcp_assist_se_system_settings"
 
 # Server type options
 SERVER_TYPE_LMSTUDIO = "lmstudio"
