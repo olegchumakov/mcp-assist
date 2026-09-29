@@ -1109,7 +1109,12 @@ class SmartDiscovery:
                         entity_count += 1
 
             # Count entities via devices in this area
-            for device_entry in device_registry.devices.values():
+            # `DeviceRegistry.devices` is an iterable view over DeviceEntry objects:
+            # iterate it directly. Older Home Assistant versions expose a plain dict
+            # and need `.values()` instead.
+            _raw_devices = device_registry.devices
+            _device_entries = _raw_devices.values() if isinstance(_raw_devices, dict) else _raw_devices
+            for device_entry in _device_entries:
                 if device_entry.area_id == area_entry.id:
                     for entity_entry in entity_registry.entities.values():
                         if (entity_entry.device_id == device_entry.id
