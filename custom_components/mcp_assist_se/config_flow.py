@@ -47,6 +47,9 @@ from .const import (
     CONF_MAX_ITERATIONS,
     CONF_DEBUG_MODE,
     CONF_ENABLE_CUSTOM_TOOLS,
+    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    CONF_ENABLE_CALCULATOR_TOOLS,
+    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
@@ -101,6 +104,9 @@ from .const import (
     DEFAULT_MAX_ITERATIONS,
     DEFAULT_DEBUG_MODE,
     DEFAULT_ENABLE_CUSTOM_TOOLS,
+    DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_ENABLE_CALCULATOR_TOOLS,
+    DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_SEARCH_PROVIDER,
@@ -910,6 +916,18 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             CONF_ENABLE_GAP_FILLING: existing_entry.data.get(
                                 CONF_ENABLE_GAP_FILLING, DEFAULT_ENABLE_GAP_FILLING
                             ),
+                            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                                DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                            ),
+                            CONF_ENABLE_CALCULATOR_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_CALCULATOR_TOOLS,
+                                DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                            ),
+                            CONF_ENABLE_UNIT_CONVERSION_TOOLS: existing_entry.data.get(
+                                CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                                DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                            ),
                         }
 
                     # Combine data from steps 1-4 + shared settings
@@ -1184,6 +1202,18 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_ALLOWED_IPS, default=DEFAULT_ALLOWED_IPS): str,
                 vol.Optional(
                     CONF_ENABLE_GAP_FILLING, default=DEFAULT_ENABLE_GAP_FILLING
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    default=DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    default=DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                    default=DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
                 ): bool,
                 vol.Optional(
                     CONF_MAX_ENTITIES_PER_DISCOVERY,
@@ -1843,6 +1873,36 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         sys_data.get(CONF_SEARXNG_URL, DEFAULT_SEARXNG_URL),
                     ),
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
+                vol.Optional(
+                    CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                    default=sys_options.get(
+                        CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                        sys_data.get(
+                            CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                            DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_CALCULATOR_TOOLS,
+                    default=sys_options.get(
+                        CONF_ENABLE_CALCULATOR_TOOLS,
+                        sys_data.get(
+                            CONF_ENABLE_CALCULATOR_TOOLS,
+                            DEFAULT_ENABLE_CALCULATOR_TOOLS,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                    default=sys_options.get(
+                        CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                        sys_data.get(
+                            CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+                            DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                        ),
+                    ),
+                ): bool,
                 vol.Optional(
                     CONF_MAX_ENTITIES_PER_DISCOVERY,
                     default=sys_options.get(
