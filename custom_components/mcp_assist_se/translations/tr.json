@@ -16,7 +16,11 @@
           "lmstudio_url": "Sunucu URL'si",
           "api_key": "API Anahtari",
           "mcp_port": "MCP Sunucu Portu",
-          "hermes_url": "Hermes Sunucu URL'si"
+          "hermes_url": "Hermes Sunucu URL'si",
+          "openclaw_host": "Ağ geçidi ana bilgisayarı",
+          "openclaw_port": "Ağ geçidi bağlantı noktası",
+          "openclaw_token": "Ağ geçidi token'ı",
+          "openclaw_use_ssl": "SSL/TLS kullan"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Brave Search API Anahtari",
           "allowed_ips": "Ek Izin Verilen IP'ler/Araliklar",
           "enable_gap_filling": "Akilli Varlik Indeksini Etkinlestir",
-          "max_entities_per_discovery": "Arama Basina Maks Varlik (20-500)"
+          "max_entities_per_discovery": "Arama Basina Maks Varlik (20-500)",
+          "enable_external_custom_tools": "Harici özel araçları etkinleştir",
+          "enable_calculator_tools": "Hesap makinesi araçlarını etkinleştir",
+          "enable_unit_conversion_tools": "Birim dönüştürme araçlarını etkinleştir",
+          "enable_memory_tools": "Kalıcı bellek araçlarını etkinleştir",
+          "searxng_url": "SearXNG URL'si"
+        },
+        "data_description": {
+          "enable_memory_tools": "Asistanın kullanıcı onaylı gerçekleri ve tercihleri hatırlamasını, geri çağırmasını ve unutmasını sağlar. Anılar, unutulmasını isteyene kadar saklanır.",
+          "searxng_url": "SearXNG örneğinizin temel URL'si (örneğin http://192.168.11.102:8888). Web Araması SearXNG olarak ayarlandığında kullanılır."
         }
+      },
+      "openclaw_pairing": {
+        "title": "OpenClaw Cihaz Eşleştirme",
+        "description": "Cihazınızın OpenClaw sunucusunda onaylanması gerekiyor.\n\n`openclaw devices approve` komutunu çalıştırarak veya OpenClaw Control UI üzerinden onaylayın, ardından Gönder'e basın.\n\nCihaz Kimliği: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "Gecersiz JSON formati. Lutfen MCP sunuculari yapilandirmanizi kontrol edin.",
       "invalid_api_key": "Gecersiz API anahtari. Lutfen kontrol edin ve tekrar deneyin.",
       "auth_failed": "Kimlik dogrulama basarisiz oldu. Lutfen API anahtarinizi dogrulayin.",
-      "unknown": "Bilinmeyen bir hata olustu."
+      "unknown": "Bilinmeyen bir hata olustu.",
+      "openclaw_connection_failed": "OpenClaw ağ geçidine bağlanılamadı. Host, port ve token'ı kontrol edin.",
+      "openclaw_not_paired": "Cihaz henüz OpenClaw sunucusunda onaylanmadı. Onaylayıp tekrar deneyin."
     },
     "abort": {
       "already_configured": "Bu ada sahip bir profil zaten mevcut. Lutfen farkli bir ad secin."
@@ -109,7 +128,11 @@
           "clean_responses": "Sesli Çıktı İçin Yanıtları Temizle",
           "openclaw_session_key": "Oturum Anahtarı / Oturum ID'si",
           "hermes_url": "Hermes Sunucu URL'si",
-          "hermes_session_key": "Bellek Oturum Anahtarı"
+          "hermes_session_key": "Bellek Oturum Anahtarı",
+          "openclaw_host": "Ağ geçidi ana bilgisayarı",
+          "openclaw_port": "Ağ geçidi bağlantı noktası",
+          "openclaw_token": "Ağ geçidi token'ı",
+          "openclaw_use_ssl": "SSL/TLS kullan"
         },
         "data_description": {
           "openclaw_session_key": "Kullanılacak OpenClaw oturumu: 'main' gibi kısa bir anahtar veya 'agent:main:main' gibi tam bir oturum ID'si.",
@@ -125,7 +148,16 @@
           "brave_api_key": "Brave Search API Anahtari",
           "allowed_ips": "Ek Izin Verilen IP'ler/Araliklar",
           "enable_gap_filling": "Akilli Varlik Indeksini Etkinlestir",
-          "max_entities_per_discovery": "Arama Basina Maks Varlik (20-500)"
+          "max_entities_per_discovery": "Arama Basina Maks Varlik (20-500)",
+          "enable_external_custom_tools": "Harici özel araçları etkinleştir",
+          "enable_calculator_tools": "Hesap makinesi araçlarını etkinleştir",
+          "enable_unit_conversion_tools": "Birim dönüştürme araçlarını etkinleştir",
+          "enable_memory_tools": "Kalıcı bellek araçlarını etkinleştir",
+          "searxng_url": "SearXNG URL'si"
+        },
+        "data_description": {
+          "enable_memory_tools": "Asistanın kullanıcı onaylı gerçekleri ve tercihleri hatırlamasını, geri çağırmasını ve unutmasını sağlar. Anılar, unutulmasını isteyene kadar saklanır.",
+          "searxng_url": "SearXNG örneğinizin temel URL'si (örneğin http://192.168.11.102:8888). Web Araması SearXNG olarak ayarlandığında kullanılır."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Harici özel araçları yeniden yükle",
+      "description": "Home Assistant'ı yeniden başlatmadan harici özel araç paketlerini yeniden yükler."
     }
   }
 }

@@ -16,7 +16,11 @@
           "lmstudio_url": "Server-URL",
           "api_key": "API-nyckel",
           "mcp_port": "MCP-serverport",
-          "hermes_url": "Hermes server-URL"
+          "hermes_url": "Hermes server-URL",
+          "openclaw_host": "Gateway-värd",
+          "openclaw_port": "Gateway-port",
+          "openclaw_token": "Gateway-token",
+          "openclaw_use_ssl": "Använd SSL/TLS"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Brave Search API-nyckel",
           "allowed_ips": "Ytterligare tillatna IP/intervall",
           "enable_gap_filling": "Aktivera smart entitetsindex",
-          "max_entities_per_discovery": "Max entiteter per sokning (20-500)"
+          "max_entities_per_discovery": "Max entiteter per sokning (20-500)",
+          "enable_external_custom_tools": "Aktivera externa anpassade verktyg",
+          "enable_calculator_tools": "Aktivera miniräknarverktyg",
+          "enable_unit_conversion_tools": "Aktivera enhetsomvandlingsverktyg",
+          "enable_memory_tools": "Aktivera verktyg för beständigt minne",
+          "searxng_url": "SearXNG-URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "Låter assistenten komma ihåg, hämta och glömma användargodkända fakta och preferenser. Minnen sparas tills du ber att få dem bortglömda.",
+          "searxng_url": "Bas-URL för din SearXNG-instans (till exempel http://192.168.11.102:8888). Används när websökning är inställd på SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "Parkoppling av OpenClaw-enhet",
+        "description": "Din enhet måste godkännas på OpenClaw-servern.\n\nGodkänn den med `openclaw devices approve` eller via OpenClaw Control UI och klicka sedan på Skicka.\n\nEnhets-ID: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "Ogiltigt JSON-format. Kontrollera din MCP-serverkonfiguration.",
       "invalid_api_key": "Ogiltig API-nyckel. Kontrollera och forsok igen.",
       "auth_failed": "Autentisering misslyckades. Verifiera din API-nyckel.",
-      "unknown": "Ett okant fel intraffade."
+      "unknown": "Ett okant fel intraffade.",
+      "openclaw_connection_failed": "Kunde inte ansluta till OpenClaw-gatewayen. Kontrollera värd, port och token.",
+      "openclaw_not_paired": "Enheten är ännu inte godkänd på OpenClaw-servern. Godkänn den och försök igen."
     },
     "abort": {
       "already_configured": "En profil med detta namn finns redan. Valj ett annat namn."
@@ -109,7 +128,11 @@
           "clean_responses": "Rensa svar för röstutmatning",
           "openclaw_session_key": "Sessionsnyckel / session-ID",
           "hermes_url": "Hermes server-URL",
-          "hermes_session_key": "Sessionsnyckel för minne"
+          "hermes_session_key": "Sessionsnyckel för minne",
+          "openclaw_host": "Gateway-värd",
+          "openclaw_port": "Gateway-port",
+          "openclaw_token": "Gateway-token",
+          "openclaw_use_ssl": "Använd SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "OpenClaw-session som ska användas: en kort nyckel som 'main' eller ett fullständigt session-ID som 'agent:main:main'.",
@@ -125,7 +148,16 @@
           "brave_api_key": "Brave Search API-nyckel",
           "allowed_ips": "Ytterligare tillatna IP/intervall",
           "enable_gap_filling": "Aktivera smart entitetsindex",
-          "max_entities_per_discovery": "Max entiteter per sokning (20-500)"
+          "max_entities_per_discovery": "Max entiteter per sokning (20-500)",
+          "enable_external_custom_tools": "Aktivera externa anpassade verktyg",
+          "enable_calculator_tools": "Aktivera miniräknarverktyg",
+          "enable_unit_conversion_tools": "Aktivera enhetsomvandlingsverktyg",
+          "enable_memory_tools": "Aktivera verktyg för beständigt minne",
+          "searxng_url": "SearXNG-URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "Låter assistenten komma ihåg, hämta och glömma användargodkända fakta och preferenser. Minnen sparas tills du ber att få dem bortglömda.",
+          "searxng_url": "Bas-URL för din SearXNG-instans (till exempel http://192.168.11.102:8888). Används när websökning är inställd på SearXNG."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Ladda om externa anpassade verktyg",
+      "description": "Laddar om paket med externa anpassade verktyg utan att starta om Home Assistant."
     }
   }
 }

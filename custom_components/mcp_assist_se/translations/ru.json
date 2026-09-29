@@ -16,7 +16,11 @@
           "lmstudio_url": "URL сервера",
           "api_key": "API-ключ",
           "mcp_port": "Порт сервера MCP",
-          "hermes_url": "URL сервера Hermes"
+          "hermes_url": "URL сервера Hermes",
+          "openclaw_host": "Хост шлюза",
+          "openclaw_port": "Порт шлюза",
+          "openclaw_token": "Токен шлюза",
+          "openclaw_use_ssl": "Использовать SSL/TLS"
         }
       },
       "model": {
@@ -73,6 +77,10 @@
           "enable_memory_tools": "Разрешить ассистенту запоминать, вспоминать и забывать ваши факты и предпочтения. Память хранится, пока вы не попросите её забыть.",
           "searxng_url": "Базовый адрес вашего SearXNG, например http://192.168.11.102:8888. Используется, когда в качестве веб-поиска выбран SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "Сопряжение устройства OpenClaw",
+        "description": "Ваше устройство нужно подтвердить на сервере OpenClaw.\n\nПодтвердите его командой `openclaw devices approve` или через OpenClaw Control UI, затем нажмите «Отправить».\n\nID устройства: {device_id}"
       }
     },
     "error": {
@@ -85,7 +93,9 @@
       "invalid_json": "Неверный формат JSON. Проверьте конфигурацию ваших MCP-серверов.",
       "invalid_api_key": "Неверный API-ключ. Проверьте и попробуйте снова.",
       "auth_failed": "Аутентификация не удалась. Проверьте ваш API-ключ.",
-      "unknown": "Произошла неизвестная ошибка."
+      "unknown": "Произошла неизвестная ошибка.",
+      "openclaw_connection_failed": "Не удалось подключиться к шлюзу OpenClaw. Проверьте хост, порт и токен.",
+      "openclaw_not_paired": "Устройство ещё не подтверждено на сервере OpenClaw. Подтвердите его и попробуйте снова."
     },
     "abort": {
       "already_configured": "Профиль с таким именем уже существует. Выберите другое имя."
@@ -118,7 +128,11 @@
           "clean_responses": "Очистка ответов для голосового вывода",
           "openclaw_session_key": "Ключ сессии / ID сессии",
           "hermes_url": "URL сервера Hermes",
-          "hermes_session_key": "Ключ сессии памяти"
+          "hermes_session_key": "Ключ сессии памяти",
+          "openclaw_host": "Хост шлюза",
+          "openclaw_port": "Порт шлюза",
+          "openclaw_token": "Токен шлюза",
+          "openclaw_use_ssl": "Использовать SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "Используемая сессия OpenClaw: короткий ключ, например 'main', или полный ID сессии, например 'agent:main:main'.",
@@ -153,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Перезагрузить внешние пользовательские инструменты",
+      "description": "Перезагружает пакеты внешних пользовательских инструментов без перезапуска Home Assistant."
     }
   }
 }

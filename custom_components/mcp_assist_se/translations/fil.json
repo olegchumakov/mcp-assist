@@ -16,7 +16,11 @@
           "lmstudio_url": "URL ng Server",
           "api_key": "API Key",
           "mcp_port": "Port ng MCP Server",
-          "hermes_url": "URL ng Hermes Server"
+          "hermes_url": "URL ng Hermes Server",
+          "openclaw_host": "Gateway Host",
+          "openclaw_port": "Gateway Port",
+          "openclaw_token": "Gateway Token",
+          "openclaw_use_ssl": "Gamitin ang SSL/TLS"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Brave Search API Key",
           "allowed_ips": "Karagdagang Pinapayagang IP/Saklaw",
           "enable_gap_filling": "I-enable ang Smart Entity Index",
-          "max_entities_per_discovery": "Max na Entity Bawat Paghahanap (20-500)"
+          "max_entities_per_discovery": "Max na Entity Bawat Paghahanap (20-500)",
+          "enable_external_custom_tools": "I-enable ang external custom tools",
+          "enable_calculator_tools": "I-enable ang calculator tools",
+          "enable_unit_conversion_tools": "I-enable ang unit conversion tools",
+          "enable_memory_tools": "I-enable ang persistent memory tools",
+          "searxng_url": "SearXNG URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "Nagpapahintulot sa assistant na matandaan, makuha, at kalimutan ang mga fact at preference na inaprubahan ng user. Nananatili ang mga memory hanggang sabihin mong kalimutan ang mga ito.",
+          "searxng_url": "Base URL ng iyong SearXNG instance (halimbawa, http://192.168.11.102:8888). Ginagamit kapag nakatakda ang Web Search sa SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "Pagpapares ng OpenClaw Device",
+        "description": "Kailangang aprubahan ang iyong device sa OpenClaw server.\n\nAprubahan ito gamit ang `openclaw devices approve` o sa OpenClaw Control UI, pagkatapos ay i-click ang Submit.\n\nDevice ID: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "Hindi wastong format ng JSON. Suriin ang iyong pagsasaayos ng mga MCP server.",
       "invalid_api_key": "Hindi wastong API key. Suriin at subukan muli.",
       "auth_failed": "Nabigo ang pagpapatunay. I-verify ang iyong API key.",
-      "unknown": "Isang hindi kilalang error ang naganap."
+      "unknown": "Isang hindi kilalang error ang naganap.",
+      "openclaw_connection_failed": "Hindi makakonekta sa OpenClaw gateway. Suriin ang host, port, at token.",
+      "openclaw_not_paired": "Hindi pa aprubado ang device sa OpenClaw server. Aprubahan ito at subukang muli."
     },
     "abort": {
       "already_configured": "Mayroon nang profile na may ganitong pangalan. Pumili ng ibang pangalan."
@@ -109,7 +128,11 @@
           "clean_responses": "Linisin ang mga Tugon para sa Voice Output",
           "openclaw_session_key": "Session Key / Session ID",
           "hermes_url": "URL ng Hermes Server",
-          "hermes_session_key": "Session Key ng Memorya"
+          "hermes_session_key": "Session Key ng Memorya",
+          "openclaw_host": "Gateway Host",
+          "openclaw_port": "Gateway Port",
+          "openclaw_token": "Gateway Token",
+          "openclaw_use_ssl": "Gamitin ang SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "OpenClaw session na gagamitin: isang maikling key tulad ng 'main' o isang buong session ID tulad ng 'agent:main:main'.",
@@ -125,7 +148,16 @@
           "brave_api_key": "Brave Search API Key",
           "allowed_ips": "Karagdagang Pinapayagang IP/Saklaw",
           "enable_gap_filling": "I-enable ang Smart Entity Index",
-          "max_entities_per_discovery": "Max na Entity Bawat Paghahanap (20-500)"
+          "max_entities_per_discovery": "Max na Entity Bawat Paghahanap (20-500)",
+          "enable_external_custom_tools": "I-enable ang external custom tools",
+          "enable_calculator_tools": "I-enable ang calculator tools",
+          "enable_unit_conversion_tools": "I-enable ang unit conversion tools",
+          "enable_memory_tools": "I-enable ang persistent memory tools",
+          "searxng_url": "SearXNG URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "Nagpapahintulot sa assistant na matandaan, makuha, at kalimutan ang mga fact at preference na inaprubahan ng user. Nananatili ang mga memory hanggang sabihin mong kalimutan ang mga ito.",
+          "searxng_url": "Base URL ng iyong SearXNG instance (halimbawa, http://192.168.11.102:8888). Ginagamit kapag nakatakda ang Web Search sa SearXNG."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "I-reload ang mga panlabas na custom na tool",
+      "description": "Muli-load ang mga external custom tool package nang hindi nire-restart ang Home Assistant."
     }
   }
 }

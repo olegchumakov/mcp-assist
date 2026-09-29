@@ -16,7 +16,11 @@
           "lmstudio_url": "URL del server",
           "api_key": "Chiave API",
           "mcp_port": "Porta server MCP",
-          "hermes_url": "URL del server Hermes"
+          "hermes_url": "URL del server Hermes",
+          "openclaw_host": "Host del gateway",
+          "openclaw_port": "Porta del gateway",
+          "openclaw_token": "Token del gateway",
+          "openclaw_use_ssl": "Usa SSL/TLS"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Chiave API Brave Search",
           "allowed_ips": "IP/Intervalli aggiuntivi consentiti",
           "enable_gap_filling": "Abilita indice intelligente entita",
-          "max_entities_per_discovery": "Max entita per ricerca (20-500)"
+          "max_entities_per_discovery": "Max entita per ricerca (20-500)",
+          "enable_external_custom_tools": "Abilita strumenti personalizzati esterni",
+          "enable_calculator_tools": "Abilita strumenti calcolatrice",
+          "enable_unit_conversion_tools": "Abilita strumenti di conversione delle unità",
+          "enable_memory_tools": "Abilita strumenti di memoria persistente",
+          "searxng_url": "URL SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "Consente all'assistente di ricordare, recuperare e dimenticare fatti e preferenze approvati dall'utente. I ricordi vengono conservati finché non ne chiedi la rimozione.",
+          "searxng_url": "URL di base della tua istanza SearXNG (ad esempio http://192.168.11.102:8888). Usato quando la ricerca web è impostata su SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "Associazione del dispositivo OpenClaw",
+        "description": "Il tuo dispositivo deve essere approvato sul server OpenClaw.\n\nApprovalo con `openclaw devices approve` o tramite la OpenClaw Control UI, poi premi Invia.\n\nID dispositivo: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "Formato JSON non valido. Controlla la configurazione dei tuoi server MCP.",
       "invalid_api_key": "Chiave API non valida. Controlla e riprova.",
       "auth_failed": "Autenticazione fallita. Verifica la tua chiave API.",
-      "unknown": "Si e verificato un errore sconosciuto."
+      "unknown": "Si e verificato un errore sconosciuto.",
+      "openclaw_connection_failed": "Impossibile connettersi al gateway OpenClaw. Controlla host, porta e token.",
+      "openclaw_not_paired": "Dispositivo non ancora approvato sul server OpenClaw. Approvalo e riprova."
     },
     "abort": {
       "already_configured": "Esiste gia un profilo con questo nome. Scegli un nome diverso."
@@ -109,7 +128,11 @@
           "clean_responses": "Pulisci risposte per output vocale",
           "openclaw_session_key": "Chiave di sessione / ID sessione",
           "hermes_url": "URL del server Hermes",
-          "hermes_session_key": "Chiave di sessione della memoria"
+          "hermes_session_key": "Chiave di sessione della memoria",
+          "openclaw_host": "Host del gateway",
+          "openclaw_port": "Porta del gateway",
+          "openclaw_token": "Token del gateway",
+          "openclaw_use_ssl": "Usa SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "Sessione OpenClaw da utilizzare: una chiave breve come 'main' o un ID di sessione completo come 'agent:main:main'.",
@@ -125,7 +148,16 @@
           "brave_api_key": "Chiave API Brave Search",
           "allowed_ips": "IP/Intervalli aggiuntivi consentiti",
           "enable_gap_filling": "Abilita indice intelligente entita",
-          "max_entities_per_discovery": "Max entita per ricerca (20-500)"
+          "max_entities_per_discovery": "Max entita per ricerca (20-500)",
+          "enable_external_custom_tools": "Abilita strumenti personalizzati esterni",
+          "enable_calculator_tools": "Abilita strumenti calcolatrice",
+          "enable_unit_conversion_tools": "Abilita strumenti di conversione delle unità",
+          "enable_memory_tools": "Abilita strumenti di memoria persistente",
+          "searxng_url": "URL SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "Consente all'assistente di ricordare, recuperare e dimenticare fatti e preferenze approvati dall'utente. I ricordi vengono conservati finché non ne chiedi la rimozione.",
+          "searxng_url": "URL di base della tua istanza SearXNG (ad esempio http://192.168.11.102:8888). Usato quando la ricerca web è impostata su SearXNG."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Ricarica strumenti personalizzati esterni",
+      "description": "Ricarica i pacchetti di strumenti personalizzati esterni senza riavviare Home Assistant."
     }
   }
 }

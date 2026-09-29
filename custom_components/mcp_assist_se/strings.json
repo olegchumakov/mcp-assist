@@ -168,5 +168,11 @@
         "name": "{profile_name}"
       }
     }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Reload external custom tools",
+      "description": "Reloads external custom tool packages without restarting Home Assistant."
+    }
   }
 }

@@ -16,7 +16,11 @@
           "lmstudio_url": "URL serveru",
           "api_key": "API klic",
           "mcp_port": "Port MCP serveru",
-          "hermes_url": "URL serveru Hermes"
+          "hermes_url": "URL serveru Hermes",
+          "openclaw_host": "Host brány",
+          "openclaw_port": "Port brány",
+          "openclaw_token": "Token brány",
+          "openclaw_use_ssl": "Použít SSL/TLS"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "API klic Brave Search",
           "allowed_ips": "Dalsi povolene IP/rozsahy",
           "enable_gap_filling": "Povolit inteligentni index entit",
-          "max_entities_per_discovery": "Max entit na vyhledavani (20-500)"
+          "max_entities_per_discovery": "Max entit na vyhledavani (20-500)",
+          "enable_external_custom_tools": "Povolit externí vlastní nástroje",
+          "enable_calculator_tools": "Povolit nástroje kalkulačky",
+          "enable_unit_conversion_tools": "Povolit nástroje pro převod jednotek",
+          "enable_memory_tools": "Povolit nástroje trvalé paměti",
+          "searxng_url": "URL SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "Umožňuje asistentovi zapamatovat si, vyhledávat a zapomínat uživatelem schválené skutečnosti a preference. Paměti zůstávají uloženy, dokud nepožádáte o jejich zapomenutí.",
+          "searxng_url": "Základní URL vaší instance SearXNG (například http://192.168.11.102:8888). Použije se, když je webové vyhledávání nastaveno na SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "Párování zařízení OpenClaw",
+        "description": "Vaše zařízení musí být schváleno na serveru OpenClaw.\n\nSchvalte je příkazem `openclaw devices approve` nebo v OpenClaw Control UI a poté klikněte na Odeslat.\n\nID zařízení: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "Neplatny format JSON. Zkontrolujte prosim konfiguraci vasich MCP serveru.",
       "invalid_api_key": "Neplatny API klic. Zkontrolujte prosim a zkuste to znovu.",
       "auth_failed": "Autentizace selhala. Overte prosim svuj API klic.",
-      "unknown": "Doslo k nezname chybe."
+      "unknown": "Doslo k nezname chybe.",
+      "openclaw_connection_failed": "Nelze se připojit k bráně OpenClaw. Zkontrolujte host, port a token.",
+      "openclaw_not_paired": "Zařízení zatím není schváleno na serveru OpenClaw. Schvalte je a zkuste to znovu."
     },
     "abort": {
       "already_configured": "Profil s timto nazvem jiz existuje. Zvolte prosim jiny nazev."
@@ -109,7 +128,11 @@
           "clean_responses": "Čisté odpovědi pro hlasový výstup",
           "openclaw_session_key": "Klíč relace / ID relace",
           "hermes_url": "URL serveru Hermes",
-          "hermes_session_key": "Klíč relace paměti"
+          "hermes_session_key": "Klíč relace paměti",
+          "openclaw_host": "Host brány",
+          "openclaw_port": "Port brány",
+          "openclaw_token": "Token brány",
+          "openclaw_use_ssl": "Použít SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "Relace OpenClaw, která se má použít: krátký klíč jako 'main' nebo úplné ID relace jako 'agent:main:main'.",
@@ -125,7 +148,16 @@
           "brave_api_key": "API klic Brave Search",
           "allowed_ips": "Dalsi povolene IP/rozsahy",
           "enable_gap_filling": "Povolit inteligentni index entit",
-          "max_entities_per_discovery": "Max entit na vyhledavani (20-500)"
+          "max_entities_per_discovery": "Max entit na vyhledavani (20-500)",
+          "enable_external_custom_tools": "Povolit externí vlastní nástroje",
+          "enable_calculator_tools": "Povolit nástroje kalkulačky",
+          "enable_unit_conversion_tools": "Povolit nástroje pro převod jednotek",
+          "enable_memory_tools": "Povolit nástroje trvalé paměti",
+          "searxng_url": "URL SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "Umožňuje asistentovi zapamatovat si, vyhledávat a zapomínat uživatelem schválené skutečnosti a preference. Paměti zůstávají uloženy, dokud nepožádáte o jejich zapomenutí.",
+          "searxng_url": "Základní URL vaší instance SearXNG (například http://192.168.11.102:8888). Použije se, když je webové vyhledávání nastaveno na SearXNG."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Znovu načíst externí vlastní nástroje",
+      "description": "Znovu načte balíčky externích vlastních nástrojů bez restartu Home Assistant."
     }
   }
 }

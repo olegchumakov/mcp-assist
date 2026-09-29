@@ -16,7 +16,11 @@
           "lmstudio_url": "URL del servidor",
           "api_key": "Clave API",
           "mcp_port": "Puerto del servidor MCP",
-          "hermes_url": "URL del servidor Hermes"
+          "hermes_url": "URL del servidor Hermes",
+          "openclaw_host": "Host de la puerta de enlace",
+          "openclaw_port": "Puerto de la puerta de enlace",
+          "openclaw_token": "Token de la puerta de enlace",
+          "openclaw_use_ssl": "Usar SSL/TLS"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Clave API de Brave Search",
           "allowed_ips": "IPs/Rangos adicionales permitidos",
           "enable_gap_filling": "Habilitar indice inteligente de entidades",
-          "max_entities_per_discovery": "Max entidades por busqueda (20-500)"
+          "max_entities_per_discovery": "Max entidades por busqueda (20-500)",
+          "enable_external_custom_tools": "Activar herramientas personalizadas externas",
+          "enable_calculator_tools": "Activar herramientas de calculadora",
+          "enable_unit_conversion_tools": "Activar herramientas de conversión de unidades",
+          "enable_memory_tools": "Activar herramientas de memoria persistente",
+          "searxng_url": "URL de SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "Permite al asistente recordar, recuperar y olvidar hechos y preferencias aprobados por el usuario. Los recuerdos se conservan hasta que pidas olvidarlos.",
+          "searxng_url": "URL base de tu instancia de SearXNG (por ejemplo, http://192.168.11.102:8888). Se usa cuando la búsqueda web está configurada como SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "Emparejamiento del dispositivo OpenClaw",
+        "description": "Tu dispositivo debe aprobarse en el servidor OpenClaw.\n\nApruébalo ejecutando `openclaw devices approve` o desde la OpenClaw Control UI y pulsa Enviar.\n\nID del dispositivo: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "Formato JSON invalido. Por favor, verifica la configuracion de tus servidores MCP.",
       "invalid_api_key": "Clave API invalida. Por favor, verifica e intenta de nuevo.",
       "auth_failed": "Autenticacion fallida. Por favor, verifica tu clave API.",
-      "unknown": "Ha ocurrido un error desconocido."
+      "unknown": "Ha ocurrido un error desconocido.",
+      "openclaw_connection_failed": "No se pudo conectar con la puerta de enlace de OpenClaw. Comprueba el host, el puerto y el token.",
+      "openclaw_not_paired": "El dispositivo aún no está aprobado en el servidor OpenClaw. Apruébalo y vuelve a intentarlo."
     },
     "abort": {
       "already_configured": "Ya existe un perfil con este nombre. Por favor, elige un nombre diferente."
@@ -109,7 +128,11 @@
           "clean_responses": "Limpiar respuestas para salida de voz",
           "openclaw_session_key": "Clave de sesión / ID de sesión",
           "hermes_url": "URL del servidor Hermes",
-          "hermes_session_key": "Clave de sesión de memoria"
+          "hermes_session_key": "Clave de sesión de memoria",
+          "openclaw_host": "Host de la puerta de enlace",
+          "openclaw_port": "Puerto de la puerta de enlace",
+          "openclaw_token": "Token de la puerta de enlace",
+          "openclaw_use_ssl": "Usar SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "Sesión de OpenClaw a utilizar: una clave corta como 'main' o un ID de sesión completo como 'agent:main:main'.",
@@ -125,7 +148,16 @@
           "brave_api_key": "Clave API de Brave Search",
           "allowed_ips": "IPs/Rangos adicionales permitidos",
           "enable_gap_filling": "Habilitar indice inteligente de entidades",
-          "max_entities_per_discovery": "Max entidades por busqueda (20-500)"
+          "max_entities_per_discovery": "Max entidades por busqueda (20-500)",
+          "enable_external_custom_tools": "Activar herramientas personalizadas externas",
+          "enable_calculator_tools": "Activar herramientas de calculadora",
+          "enable_unit_conversion_tools": "Activar herramientas de conversión de unidades",
+          "enable_memory_tools": "Activar herramientas de memoria persistente",
+          "searxng_url": "URL de SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "Permite al asistente recordar, recuperar y olvidar hechos y preferencias aprobados por el usuario. Los recuerdos se conservan hasta que pidas olvidarlos.",
+          "searxng_url": "URL base de tu instancia de SearXNG (por ejemplo, http://192.168.11.102:8888). Se usa cuando la búsqueda web está configurada como SearXNG."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Recargar herramientas personalizadas externas",
+      "description": "Recarga los paquetes de herramientas personalizadas externas sin reiniciar Home Assistant."
     }
   }
 }

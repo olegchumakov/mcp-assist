@@ -16,7 +16,11 @@
           "lmstudio_url": "서버 URL",
           "api_key": "API 키",
           "mcp_port": "MCP 서버 포트",
-          "hermes_url": "Hermes 서버 URL"
+          "hermes_url": "Hermes 서버 URL",
+          "openclaw_host": "게이트웨이 호스트",
+          "openclaw_port": "게이트웨이 포트",
+          "openclaw_token": "게이트웨이 토큰",
+          "openclaw_use_ssl": "SSL/TLS 사용"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Brave Search API 키",
           "allowed_ips": "추가 허용 IP/범위",
           "enable_gap_filling": "스마트 엔티티 인덱스 활성화",
-          "max_entities_per_discovery": "검색당 최대 엔티티 수 (20-500)"
+          "max_entities_per_discovery": "검색당 최대 엔티티 수 (20-500)",
+          "enable_external_custom_tools": "외부 사용자 지정 도구 사용",
+          "enable_calculator_tools": "계산기 도구 사용",
+          "enable_unit_conversion_tools": "단위 변환 도구 사용",
+          "enable_memory_tools": "영구 메모리 도구 사용",
+          "searxng_url": "SearXNG URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "사용자가 승인한 사실과 선호를 어시스턴트가 기억, 불러오기, 삭제할 수 있게 합니다. 메모리는 잊어달라고 요청할 때까지 유지됩니다.",
+          "searxng_url": "SearXNG 인스턴스의 기본 URL(예: http://192.168.11.102:8888). 웹 검색이 SearXNG로 설정된 경우 사용됩니다."
         }
+      },
+      "openclaw_pairing": {
+        "title": "OpenClaw 기기 페어링",
+        "description": "기기를 OpenClaw 서버에서 승인해야 합니다.\n\n`openclaw devices approve`를 실행하거나 OpenClaw Control UI에서 승인한 후 제출을 클릭하세요.\n\n기기 ID: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "잘못된 JSON 형식입니다. MCP 서버 구성을 확인하세요.",
       "invalid_api_key": "잘못된 API 키입니다. 확인 후 다시 시도하세요.",
       "auth_failed": "인증에 실패했습니다. API 키를 확인하세요.",
-      "unknown": "알 수 없는 오류가 발생했습니다."
+      "unknown": "알 수 없는 오류가 발생했습니다.",
+      "openclaw_connection_failed": "OpenClaw 게이트웨이에 연결할 수 없습니다. 호스트, 포트, 토큰을 확인하세요.",
+      "openclaw_not_paired": "기기가 아직 OpenClaw 서버에서 승인되지 않았습니다. 승인한 후 다시 시도하세요."
     },
     "abort": {
       "already_configured": "이 이름의 프로필이 이미 존재합니다. 다른 이름을 선택하세요."
@@ -109,7 +128,11 @@
           "clean_responses": "음성 출력용 응답 정리",
           "openclaw_session_key": "세션 키 / 세션 ID",
           "hermes_url": "Hermes 서버 URL",
-          "hermes_session_key": "메모리 세션 키"
+          "hermes_session_key": "메모리 세션 키",
+          "openclaw_host": "게이트웨이 호스트",
+          "openclaw_port": "게이트웨이 포트",
+          "openclaw_token": "게이트웨이 토큰",
+          "openclaw_use_ssl": "SSL/TLS 사용"
         },
         "data_description": {
           "openclaw_session_key": "사용할 OpenClaw 세션: 'main'과 같은 짧은 키 또는 'agent:main:main'과 같은 전체 세션 ID.",
@@ -125,7 +148,16 @@
           "brave_api_key": "Brave Search API 키",
           "allowed_ips": "추가 허용 IP/범위",
           "enable_gap_filling": "스마트 엔티티 인덱스 활성화",
-          "max_entities_per_discovery": "검색당 최대 엔티티 수 (20-500)"
+          "max_entities_per_discovery": "검색당 최대 엔티티 수 (20-500)",
+          "enable_external_custom_tools": "외부 사용자 지정 도구 사용",
+          "enable_calculator_tools": "계산기 도구 사용",
+          "enable_unit_conversion_tools": "단위 변환 도구 사용",
+          "enable_memory_tools": "영구 메모리 도구 사용",
+          "searxng_url": "SearXNG URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "사용자가 승인한 사실과 선호를 어시스턴트가 기억, 불러오기, 삭제할 수 있게 합니다. 메모리는 잊어달라고 요청할 때까지 유지됩니다.",
+          "searxng_url": "SearXNG 인스턴스의 기본 URL(예: http://192.168.11.102:8888). 웹 검색이 SearXNG로 설정된 경우 사용됩니다."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "외부 사용자 지정 도구 다시 로드",
+      "description": "Home Assistant를 다시 시작하지 않고 외부 사용자 지정 도구 패키지를 다시 로드합니다."
     }
   }
 }

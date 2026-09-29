@@ -16,7 +16,11 @@
           "lmstudio_url": "服务器URL",
           "api_key": "API密钥",
           "mcp_port": "MCP服务器端口",
-          "hermes_url": "Hermes服务器URL"
+          "hermes_url": "Hermes服务器URL",
+          "openclaw_host": "网关主机",
+          "openclaw_port": "网关端口",
+          "openclaw_token": "网关令牌",
+          "openclaw_use_ssl": "使用 SSL/TLS"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Brave搜索API密钥",
           "allowed_ips": "额外允许的IP/范围",
           "enable_gap_filling": "启用智能实体索引",
-          "max_entities_per_discovery": "每次发现最大实体数 (20-500)"
+          "max_entities_per_discovery": "每次发现最大实体数 (20-500)",
+          "enable_external_custom_tools": "启用外部自定义工具",
+          "enable_calculator_tools": "启用计算器工具",
+          "enable_unit_conversion_tools": "启用单位换算工具",
+          "enable_memory_tools": "启用持久记忆工具",
+          "searxng_url": "SearXNG URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "允许助手记住、回忆和忘记用户认可的事实与偏好。记忆会一直保留，直到您要求忘记。",
+          "searxng_url": "您的 SearXNG 实例的基础 URL（例如 http://192.168.11.102:8888）。当 Web 搜索设置为 SearXNG 时使用。"
         }
+      },
+      "openclaw_pairing": {
+        "title": "OpenClaw 设备配对",
+        "description": "您的设备需要在 OpenClaw 服务器上获得批准。\n\n运行 `openclaw devices approve` 或通过 OpenClaw Control UI 批准，然后点击「提交」。\n\n设备 ID：{device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "JSON格式无效。请检查您的MCP服务器配置。",
       "invalid_api_key": "API密钥无效。请检查后重试。",
       "auth_failed": "身份验证失败。请验证您的API密钥。",
-      "unknown": "发生未知错误。"
+      "unknown": "发生未知错误。",
+      "openclaw_connection_failed": "无法连接到 OpenClaw 网关。请检查主机、端口和令牌。",
+      "openclaw_not_paired": "设备尚未在 OpenClaw 服务器上获得批准。请批准后重试。"
     },
     "abort": {
       "already_configured": "已存在同名配置文件。请选择其他名称。"
@@ -109,7 +128,11 @@
           "clean_responses": "清理语音输出响应",
           "openclaw_session_key": "会话密钥 / 会话ID",
           "hermes_url": "Hermes服务器URL",
-          "hermes_session_key": "记忆会话密钥"
+          "hermes_session_key": "记忆会话密钥",
+          "openclaw_host": "网关主机",
+          "openclaw_port": "网关端口",
+          "openclaw_token": "网关令牌",
+          "openclaw_use_ssl": "使用 SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "要使用的OpenClaw会话:如 'main' 的短密钥,或如 'agent:main:main' 的完整会话ID。",
@@ -125,7 +148,16 @@
           "brave_api_key": "Brave搜索API密钥",
           "allowed_ips": "额外允许的IP/范围",
           "enable_gap_filling": "启用智能实体索引",
-          "max_entities_per_discovery": "每次发现最大实体数 (20-500)"
+          "max_entities_per_discovery": "每次发现最大实体数 (20-500)",
+          "enable_external_custom_tools": "启用外部自定义工具",
+          "enable_calculator_tools": "启用计算器工具",
+          "enable_unit_conversion_tools": "启用单位换算工具",
+          "enable_memory_tools": "启用持久记忆工具",
+          "searxng_url": "SearXNG URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "允许助手记住、回忆和忘记用户认可的事实与偏好。记忆会一直保留，直到您要求忘记。",
+          "searxng_url": "您的 SearXNG 实例的基础 URL（例如 http://192.168.11.102:8888）。当 Web 搜索设置为 SearXNG 时使用。"
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "重新加载外部自定义工具",
+      "description": "在不重启 Home Assistant 的情况下重新加载外部自定义工具包。"
     }
   }
 }

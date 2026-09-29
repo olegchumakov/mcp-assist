@@ -16,7 +16,11 @@
           "lmstudio_url": "عنوان URL للخادم",
           "api_key": "مفتاح API",
           "mcp_port": "منفذ خادم MCP",
-          "hermes_url": "عنوان URL لخادم Hermes"
+          "hermes_url": "عنوان URL لخادم Hermes",
+          "openclaw_host": "مضيف البوابة",
+          "openclaw_port": "منفذ البوابة",
+          "openclaw_token": "رمز البوابة",
+          "openclaw_use_ssl": "استخدام SSL/TLS"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "مفتاح API لـ Brave Search",
           "allowed_ips": "عناوين IP/نطاقات اضافية مسموح بها",
           "enable_gap_filling": "تمكين فهرس الكيانات الذكي",
-          "max_entities_per_discovery": "الحد الاقصى للكيانات لكل اكتشاف (20-500)"
+          "max_entities_per_discovery": "الحد الاقصى للكيانات لكل اكتشاف (20-500)",
+          "enable_external_custom_tools": "تفعيل الأدوات المخصصة الخارجية",
+          "enable_calculator_tools": "تفعيل أدوات الآلة الحاسبة",
+          "enable_unit_conversion_tools": "تفعيل أدوات تحويل الوحدات",
+          "enable_memory_tools": "تفعيل أدوات الذاكرة الدائمة",
+          "searxng_url": "عنوان SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "يتيح للمساعد تذكّر الحقائق والتفضيلات التي يوافق عليها المستخدم واسترجاعها ونسيانها. تبقى الذكريات محفوظة حتى تطلب نسيانها.",
+          "searxng_url": "العنوان الأساسي لخادم SearXNG لديك (مثال: http://192.168.11.102:8888). يُستخدم عندما يكون بحث الويب مضبوطًا على SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "إقران جهاز OpenClaw",
+        "description": "يجب اعتماد جهازك على خادم OpenClaw.\n\nاعتمده بتشغيل `openclaw devices approve` أو عبر واجهة OpenClaw Control UI، ثم اضغط «إرسال».\n\nمعرّف الجهاز: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "تنسيق JSON غير صالح. يرجى التحقق من تكوين خوادم MCP الخاصة بك.",
       "invalid_api_key": "مفتاح API غير صالح. يرجى التحقق والمحاولة مرة اخرى.",
       "auth_failed": "فشلت المصادقة. يرجى التحقق من مفتاح API الخاص بك.",
-      "unknown": "حدث خطا غير معروف."
+      "unknown": "حدث خطا غير معروف.",
+      "openclaw_connection_failed": "تعذّر الاتصال ببوابة OpenClaw. تحقق من المضيف والمنفذ والرمز.",
+      "openclaw_not_paired": "لم تتم الموافقة على الجهاز بعد على خادم OpenClaw. يُرجى اعتماده والمحاولة مجددًا."
     },
     "abort": {
       "already_configured": "يوجد ملف شخصي بهذا الاسم بالفعل. يرجى اختيار اسم مختلف."
@@ -109,7 +128,11 @@
           "clean_responses": "تنظيف الردود للإخراج الصوتي",
           "openclaw_session_key": "مفتاح الجلسة / معرّف الجلسة",
           "hermes_url": "عنوان URL لخادم Hermes",
-          "hermes_session_key": "مفتاح جلسة الذاكرة"
+          "hermes_session_key": "مفتاح جلسة الذاكرة",
+          "openclaw_host": "مضيف البوابة",
+          "openclaw_port": "منفذ البوابة",
+          "openclaw_token": "رمز البوابة",
+          "openclaw_use_ssl": "استخدام SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "جلسة OpenClaw المراد استخدامها: مفتاح قصير مثل 'main' أو معرّف جلسة كامل مثل 'agent:main:main'.",
@@ -125,7 +148,16 @@
           "brave_api_key": "مفتاح API لـ Brave Search",
           "allowed_ips": "عناوين IP/نطاقات اضافية مسموح بها",
           "enable_gap_filling": "تمكين فهرس الكيانات الذكي",
-          "max_entities_per_discovery": "الحد الاقصى للكيانات لكل اكتشاف (20-500)"
+          "max_entities_per_discovery": "الحد الاقصى للكيانات لكل اكتشاف (20-500)",
+          "enable_external_custom_tools": "تفعيل الأدوات المخصصة الخارجية",
+          "enable_calculator_tools": "تفعيل أدوات الآلة الحاسبة",
+          "enable_unit_conversion_tools": "تفعيل أدوات تحويل الوحدات",
+          "enable_memory_tools": "تفعيل أدوات الذاكرة الدائمة",
+          "searxng_url": "عنوان SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "يتيح للمساعد تذكّر الحقائق والتفضيلات التي يوافق عليها المستخدم واسترجاعها ونسيانها. تبقى الذكريات محفوظة حتى تطلب نسيانها.",
+          "searxng_url": "العنوان الأساسي لخادم SearXNG لديك (مثال: http://192.168.11.102:8888). يُستخدم عندما يكون بحث الويب مضبوطًا على SearXNG."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "إعادة تحميل الأدوات المخصصة الخارجية",
+      "description": "يعيد تحميل حزم الأدوات المخصصة الخارجية دون إعادة تشغيل Home Assistant."
     }
   }
 }

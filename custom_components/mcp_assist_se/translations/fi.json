@@ -16,7 +16,11 @@
           "lmstudio_url": "Palvelimen URL",
           "api_key": "API-avain",
           "mcp_port": "MCP-palvelinportti",
-          "hermes_url": "Hermes-palvelimen URL"
+          "hermes_url": "Hermes-palvelimen URL",
+          "openclaw_host": "Yhdyskäytävän isäntä",
+          "openclaw_port": "Yhdyskäytävän portti",
+          "openclaw_token": "Yhdyskäytävän tunnus",
+          "openclaw_use_ssl": "Käytä SSL/TLS:ää"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Brave Search API-avain",
           "allowed_ips": "Lisat sallitut IP:t/alueet",
           "enable_gap_filling": "Ota alyas entiteetti-indeksi kayttoon",
-          "max_entities_per_discovery": "Max entiteettia per haku (20-500)"
+          "max_entities_per_discovery": "Max entiteettia per haku (20-500)",
+          "enable_external_custom_tools": "Ota ulkoiset mukautetut työkalut käyttöön",
+          "enable_calculator_tools": "Ota laskintyökalut käyttöön",
+          "enable_unit_conversion_tools": "Ota yksikkömuunnostyökalut käyttöön",
+          "enable_memory_tools": "Ota pysyvän muistin työkalut käyttöön",
+          "searxng_url": "SearXNG-URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "Antaa avustajan muistaa, hakea ja unohtaa käyttäjän hyväksymät tiedot ja mieltymykset. Muistot säilyvät, kunnes pyydät unohtamaan ne.",
+          "searxng_url": "SearXNG-instanssisi perus-URL (esimerkiksi http://192.168.11.102:8888). Käytetään, kun verkkohauksi on valittu SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "OpenClaw-laitteen pariliitos",
+        "description": "Laite on hyväksyttävä OpenClaw-palvelimella.\n\nHyväksy se komennolla `openclaw devices approve` tai OpenClaw Control UI:n kautta ja napsauta sitten Lähetä.\n\nLaitteen tunnus: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "Virheellinen JSON-muoto. Tarkista MCP-palvelimien maaritys.",
       "invalid_api_key": "Virheellinen API-avain. Tarkista ja yrita uudelleen.",
       "auth_failed": "Todennus epaonnistui. Vahvista API-avaimesi.",
-      "unknown": "Tuntematon virhe tapahtui."
+      "unknown": "Tuntematon virhe tapahtui.",
+      "openclaw_connection_failed": "Yhteyttä OpenClaw-yhdyskäytävään ei voitu muodostaa. Tarkista isäntä, portti ja tunnus.",
+      "openclaw_not_paired": "Laitetta ei ole vielä hyväksytty OpenClaw-palvelimella. Hyväksy se ja yritä uudelleen."
     },
     "abort": {
       "already_configured": "Taman niminen profiili on jo olemassa. Valitse toinen nimi."
@@ -109,7 +128,11 @@
           "clean_responses": "Puhdista vastaukset äänilähtöä varten",
           "openclaw_session_key": "Istuntoavain / istunnon ID",
           "hermes_url": "Hermes-palvelimen URL",
-          "hermes_session_key": "Muistin istuntoavain"
+          "hermes_session_key": "Muistin istuntoavain",
+          "openclaw_host": "Yhdyskäytävän isäntä",
+          "openclaw_port": "Yhdyskäytävän portti",
+          "openclaw_token": "Yhdyskäytävän tunnus",
+          "openclaw_use_ssl": "Käytä SSL/TLS:ää"
         },
         "data_description": {
           "openclaw_session_key": "Käytettävä OpenClaw-istunto: lyhyt avain kuten 'main' tai täydellinen istunnon ID kuten 'agent:main:main'.",
@@ -125,7 +148,16 @@
           "brave_api_key": "Brave Search API-avain",
           "allowed_ips": "Lisat sallitut IP:t/alueet",
           "enable_gap_filling": "Ota alyas entiteetti-indeksi kayttoon",
-          "max_entities_per_discovery": "Max entiteettia per haku (20-500)"
+          "max_entities_per_discovery": "Max entiteettia per haku (20-500)",
+          "enable_external_custom_tools": "Ota ulkoiset mukautetut työkalut käyttöön",
+          "enable_calculator_tools": "Ota laskintyökalut käyttöön",
+          "enable_unit_conversion_tools": "Ota yksikkömuunnostyökalut käyttöön",
+          "enable_memory_tools": "Ota pysyvän muistin työkalut käyttöön",
+          "searxng_url": "SearXNG-URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "Antaa avustajan muistaa, hakea ja unohtaa käyttäjän hyväksymät tiedot ja mieltymykset. Muistot säilyvät, kunnes pyydät unohtamaan ne.",
+          "searxng_url": "SearXNG-instanssisi perus-URL (esimerkiksi http://192.168.11.102:8888). Käytetään, kun verkkohauksi on valittu SearXNG."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Lataa ulkoiset mukautetut työkalut uudelleen",
+      "description": "Lataa ulkoiset mukautetut työkalupaketit uudelleen ilman Home Assistantin uudelleenkäynnistystä."
     }
   }
 }

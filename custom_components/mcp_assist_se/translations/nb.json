@@ -16,7 +16,11 @@
           "lmstudio_url": "Server-URL",
           "api_key": "API-nokkel",
           "mcp_port": "MCP-serverport",
-          "hermes_url": "Hermes server-URL"
+          "hermes_url": "Hermes server-URL",
+          "openclaw_host": "Gateway-vert",
+          "openclaw_port": "Gateway-port",
+          "openclaw_token": "Gateway-token",
+          "openclaw_use_ssl": "Bruk SSL/TLS"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Brave Search API-nokkel",
           "allowed_ips": "Ekstra tillatte IP-er/omrader",
           "enable_gap_filling": "Aktiver smart entitetsindeks",
-          "max_entities_per_discovery": "Maks entiteter per sok (20-500)"
+          "max_entities_per_discovery": "Maks entiteter per sok (20-500)",
+          "enable_external_custom_tools": "Aktiver eksterne egendefinerte verktøy",
+          "enable_calculator_tools": "Aktiver kalkulatorverktøy",
+          "enable_unit_conversion_tools": "Aktiver enhetskonverteringsverktøy",
+          "enable_memory_tools": "Aktiver verktøy for varig minne",
+          "searxng_url": "SearXNG-URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "Lar assistenten huske, hente og glemme brukergodkjente fakta og preferanser. Minner beholdes til du ber om å glemme dem.",
+          "searxng_url": "Base-URL for SearXNG-forekomsten din (for eksempel http://192.168.11.102:8888). Brukes når nettsøk er satt til SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "OpenClaw-enhetsparing",
+        "description": "Enheten din må godkjennes på OpenClaw-serveren.\n\nGodkjenn den med `openclaw devices approve` eller via OpenClaw Control UI, og klikk deretter på Send.\n\nEnhets-ID: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "Ugyldig JSON-format. Sjekk MCP-serverkonfigurasjonen din.",
       "invalid_api_key": "Ugyldig API-nokkel. Sjekk og prov igjen.",
       "auth_failed": "Autentisering mislyktes. Verifiser API-nokkelen din.",
-      "unknown": "En ukjent feil oppstod."
+      "unknown": "En ukjent feil oppstod.",
+      "openclaw_connection_failed": "Kunne ikke koble til OpenClaw-gatewayen. Sjekk vert, port og token.",
+      "openclaw_not_paired": "Enheten er ikke godkjent på OpenClaw-serveren ennå. Godkjenn den og prøv igjen."
     },
     "abort": {
       "already_configured": "En profil med dette navnet finnes allerede. Velg et annet navn."
@@ -109,7 +128,11 @@
           "clean_responses": "Rens svar for stemmeoutput",
           "openclaw_session_key": "Øktnøkkel / økt-ID",
           "hermes_url": "Hermes server-URL",
-          "hermes_session_key": "Øktnøkkel for minne"
+          "hermes_session_key": "Øktnøkkel for minne",
+          "openclaw_host": "Gateway-vert",
+          "openclaw_port": "Gateway-port",
+          "openclaw_token": "Gateway-token",
+          "openclaw_use_ssl": "Bruk SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "OpenClaw-økt som skal brukes: en kort nøkkel som 'main' eller en full økt-ID som 'agent:main:main'.",
@@ -125,7 +148,16 @@
           "brave_api_key": "Brave Search API-nokkel",
           "allowed_ips": "Ekstra tillatte IP-er/omrader",
           "enable_gap_filling": "Aktiver smart entitetsindeks",
-          "max_entities_per_discovery": "Maks entiteter per sok (20-500)"
+          "max_entities_per_discovery": "Maks entiteter per sok (20-500)",
+          "enable_external_custom_tools": "Aktiver eksterne egendefinerte verktøy",
+          "enable_calculator_tools": "Aktiver kalkulatorverktøy",
+          "enable_unit_conversion_tools": "Aktiver enhetskonverteringsverktøy",
+          "enable_memory_tools": "Aktiver verktøy for varig minne",
+          "searxng_url": "SearXNG-URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "Lar assistenten huske, hente og glemme brukergodkjente fakta og preferanser. Minner beholdes til du ber om å glemme dem.",
+          "searxng_url": "Base-URL for SearXNG-forekomsten din (for eksempel http://192.168.11.102:8888). Brukes når nettsøk er satt til SearXNG."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Last inn eksterne egendefinerte verktøy på nytt",
+      "description": "Laster inn pakker med eksterne egendefinerte verktøy på nytt uten å starte Home Assistant på nytt."
     }
   }
 }

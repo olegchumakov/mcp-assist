@@ -16,7 +16,11 @@
           "lmstudio_url": "सर्वर URL",
           "api_key": "API कुंजी",
           "mcp_port": "MCP सर्वर पोर्ट",
-          "hermes_url": "Hermes सर्वर URL"
+          "hermes_url": "Hermes सर्वर URL",
+          "openclaw_host": "गेटवे होस्ट",
+          "openclaw_port": "गेटवे पोर्ट",
+          "openclaw_token": "गेटवे टोकन",
+          "openclaw_use_ssl": "SSL/TLS का उपयोग करें"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Brave Search API कुंजी",
           "allowed_ips": "अतिरिक्त अनुमत IP/रेंज",
           "enable_gap_filling": "स्मार्ट एंटिटी इंडेक्स सक्षम करें",
-          "max_entities_per_discovery": "प्रति खोज अधिकतम एंटिटी (20-500)"
+          "max_entities_per_discovery": "प्रति खोज अधिकतम एंटिटी (20-500)",
+          "enable_external_custom_tools": "बाहरी कस्टम टूल सक्षम करें",
+          "enable_calculator_tools": "कैलकुलेटर टूल सक्षम करें",
+          "enable_unit_conversion_tools": "इकाई रूपांतरण टूल सक्षम करें",
+          "enable_memory_tools": "स्थायी मेमोरी टूल सक्षम करें",
+          "searxng_url": "SearXNG URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "सहायक को उपयोगकर्ता-स्वीकृत तथ्यों और प्राथमिकताओं को याद रखने, याद दिलाने और भुलाने देता है। यादें तब तक सुरक्षित रहती हैं जब तक आप भुलाने के लिए न कहें।",
+          "searxng_url": "आपके SearXNG इंस्टेंस का आधार URL (उदाहरण: http://192.168.11.102:8888)। तब उपयोग होता है जब वेब सर्च SearXNG पर सेट हो।"
         }
+      },
+      "openclaw_pairing": {
+        "title": "OpenClaw डिवाइस पेयरिंग",
+        "description": "आपके डिवाइस को OpenClaw सर्वर पर स्वीकृत करना होगा।\n\n`openclaw devices approve` चलाकर या OpenClaw Control UI से स्वीकृत करें, फिर सबमिट पर क्लिक करें।\n\nडिवाइस ID: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "अमान्य JSON प्रारूप। कृपया अपना MCP सर्वर कॉन्फ़िगरेशन जांचें।",
       "invalid_api_key": "अमान्य API कुंजी। कृपया जांचें और पुनः प्रयास करें।",
       "auth_failed": "प्रमाणीकरण विफल। कृपया अपनी API कुंजी सत्यापित करें।",
-      "unknown": "एक अज्ञात त्रुटि हुई।"
+      "unknown": "एक अज्ञात त्रुटि हुई।",
+      "openclaw_connection_failed": "OpenClaw गेटवे से कनेक्ट नहीं हो सका। होस्ट, पोर्ट और टोकन जाँचें।",
+      "openclaw_not_paired": "डिवाइस अभी OpenClaw सर्वर पर स्वीकृत नहीं है। इसे स्वीकृत करके फिर से प्रयास करें।"
     },
     "abort": {
       "already_configured": "इस नाम की प्रोफ़ाइल पहले से मौजूद है। कृपया कोई अलग नाम चुनें।"
@@ -109,7 +128,11 @@
           "clean_responses": "वॉइस आउटपुट के लिए साफ़ प्रतिक्रियाएँ",
           "openclaw_session_key": "सत्र कुंजी / सत्र ID",
           "hermes_url": "Hermes सर्वर URL",
-          "hermes_session_key": "मेमोरी सत्र कुंजी"
+          "hermes_session_key": "मेमोरी सत्र कुंजी",
+          "openclaw_host": "गेटवे होस्ट",
+          "openclaw_port": "गेटवे पोर्ट",
+          "openclaw_token": "गेटवे टोकन",
+          "openclaw_use_ssl": "SSL/TLS का उपयोग करें"
         },
         "data_description": {
           "openclaw_session_key": "उपयोग करने के लिए OpenClaw सत्र: 'main' जैसी छोटी कुंजी या 'agent:main:main' जैसी पूरी सत्र ID।",
@@ -125,7 +148,16 @@
           "brave_api_key": "Brave Search API कुंजी",
           "allowed_ips": "अतिरिक्त अनुमत IP/रेंज",
           "enable_gap_filling": "स्मार्ट एंटिटी इंडेक्स सक्षम करें",
-          "max_entities_per_discovery": "प्रति खोज अधिकतम एंटिटी (20-500)"
+          "max_entities_per_discovery": "प्रति खोज अधिकतम एंटिटी (20-500)",
+          "enable_external_custom_tools": "बाहरी कस्टम टूल सक्षम करें",
+          "enable_calculator_tools": "कैलकुलेटर टूल सक्षम करें",
+          "enable_unit_conversion_tools": "इकाई रूपांतरण टूल सक्षम करें",
+          "enable_memory_tools": "स्थायी मेमोरी टूल सक्षम करें",
+          "searxng_url": "SearXNG URL"
+        },
+        "data_description": {
+          "enable_memory_tools": "सहायक को उपयोगकर्ता-स्वीकृत तथ्यों और प्राथमिकताओं को याद रखने, याद दिलाने और भुलाने देता है। यादें तब तक सुरक्षित रहती हैं जब तक आप भुलाने के लिए न कहें।",
+          "searxng_url": "आपके SearXNG इंस्टेंस का आधार URL (उदाहरण: http://192.168.11.102:8888)। तब उपयोग होता है जब वेब सर्च SearXNG पर सेट हो।"
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "बाहरी कस्टम टूल पुनः लोड करें",
+      "description": "Home Assistant को पुनः आरंभ किए बिना बाहरी कस्टम टूल पैकेज पुनः लोड करता है।"
     }
   }
 }

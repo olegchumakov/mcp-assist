@@ -16,7 +16,11 @@
           "lmstudio_url": "URL διακομιστη",
           "api_key": "Κλειδι API",
           "mcp_port": "Θυρα διακομιστη MCP",
-          "hermes_url": "URL διακομιστή Hermes"
+          "hermes_url": "URL διακομιστή Hermes",
+          "openclaw_host": "Host πύλης",
+          "openclaw_port": "Θύρα πύλης",
+          "openclaw_token": "Token πύλης",
+          "openclaw_use_ssl": "Χρήση SSL/TLS"
         }
       },
       "model": {
@@ -62,8 +66,21 @@
           "brave_api_key": "Κλειδι API Brave Search",
           "allowed_ips": "Επιπλεον επιτρεπομενες IP/Ευρη",
           "enable_gap_filling": "Ενεργοποιηση εξυπνου ευρετηριου οντοτητων",
-          "max_entities_per_discovery": "Μεγιστες οντοτητες ανα αναζητηση (20-500)"
+          "max_entities_per_discovery": "Μεγιστες οντοτητες ανα αναζητηση (20-500)",
+          "enable_external_custom_tools": "Ενεργοποίηση εξωτερικών προσαρμοσμένων εργαλείων",
+          "enable_calculator_tools": "Ενεργοποίηση εργαλείων αριθμομηχανής",
+          "enable_unit_conversion_tools": "Ενεργοποίηση εργαλείων μετατροπής μονάδων",
+          "enable_memory_tools": "Ενεργοποίηση εργαλείων μόνιμης μνήμης",
+          "searxng_url": "URL SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "Επιτρέπει στον βοηθό να θυμάται, να ανακτά και να ξεχνά γεγονότα και προτιμήσεις που έχουν εγκριθεί από τον χρήστη. Οι αναμνήσεις διατηρούνται μέχρι να ζητήσετε να ξεχαστούν.",
+          "searxng_url": "Βασικό URL της παρουσίας SearXNG σας (για παράδειγμα http://192.168.11.102:8888). Χρησιμοποιείται όταν η αναζήτηση ιστού έχει οριστεί σε SearXNG."
         }
+      },
+      "openclaw_pairing": {
+        "title": "Σύζευξη συσκευής OpenClaw",
+        "description": "Η συσκευή σας πρέπει να εγκριθεί στον διακομιστή OpenClaw.\n\nΕγκρίνετε την εκτελώντας `openclaw devices approve` ή μέσω του OpenClaw Control UI και μετά πατήστε Υποβολή.\n\nΑναγνωριστικό συσκευής: {device_id}"
       }
     },
     "error": {
@@ -76,7 +93,9 @@
       "invalid_json": "Μη εγκυρη μορφη JSON. Ελεγξτε τη διαμορφωση των διακομιστων MCP σας.",
       "invalid_api_key": "Μη εγκυρο κλειδι API. Ελεγξτε και δοκιμαστε ξανα.",
       "auth_failed": "Η ταυτοποιηση απετυχε. Επαληθευστε το κλειδι API σας.",
-      "unknown": "Προεκυψε αγνωστο σφαλμα."
+      "unknown": "Προεκυψε αγνωστο σφαλμα.",
+      "openclaw_connection_failed": "Δεν ήταν δυνατή η σύνδεση με την πύλη OpenClaw. Ελέγξτε το host, τη θύρα και το token.",
+      "openclaw_not_paired": "Η συσκευή δεν έχει εγκριθεί ακόμη στον διακομιστή OpenClaw. Εγκρίνετε την και δοκιμάστε ξανά."
     },
     "abort": {
       "already_configured": "Υπαρχει ηδη προφιλ με αυτο το ονομα. Επιλεξτε διαφορετικο ονομα."
@@ -109,7 +128,11 @@
           "clean_responses": "Καθαρισμός απαντήσεων για φωνητική έξοδο",
           "openclaw_session_key": "Κλειδί συνεδρίας / ID συνεδρίας",
           "hermes_url": "URL διακομιστή Hermes",
-          "hermes_session_key": "Κλειδί συνεδρίας μνήμης"
+          "hermes_session_key": "Κλειδί συνεδρίας μνήμης",
+          "openclaw_host": "Host πύλης",
+          "openclaw_port": "Θύρα πύλης",
+          "openclaw_token": "Token πύλης",
+          "openclaw_use_ssl": "Χρήση SSL/TLS"
         },
         "data_description": {
           "openclaw_session_key": "Συνεδρία OpenClaw προς χρήση: ένα σύντομο κλειδί όπως 'main' ή ένα πλήρες ID συνεδρίας όπως 'agent:main:main'.",
@@ -125,7 +148,16 @@
           "brave_api_key": "Κλειδι API Brave Search",
           "allowed_ips": "Επιπλεον επιτρεπομενες IP/Ευρη",
           "enable_gap_filling": "Ενεργοποιηση εξυπνου ευρετηριου οντοτητων",
-          "max_entities_per_discovery": "Μεγιστες οντοτητες ανα αναζητηση (20-500)"
+          "max_entities_per_discovery": "Μεγιστες οντοτητες ανα αναζητηση (20-500)",
+          "enable_external_custom_tools": "Ενεργοποίηση εξωτερικών προσαρμοσμένων εργαλείων",
+          "enable_calculator_tools": "Ενεργοποίηση εργαλείων αριθμομηχανής",
+          "enable_unit_conversion_tools": "Ενεργοποίηση εργαλείων μετατροπής μονάδων",
+          "enable_memory_tools": "Ενεργοποίηση εργαλείων μόνιμης μνήμης",
+          "searxng_url": "URL SearXNG"
+        },
+        "data_description": {
+          "enable_memory_tools": "Επιτρέπει στον βοηθό να θυμάται, να ανακτά και να ξεχνά γεγονότα και προτιμήσεις που έχουν εγκριθεί από τον χρήστη. Οι αναμνήσεις διατηρούνται μέχρι να ζητήσετε να ξεχαστούν.",
+          "searxng_url": "Βασικό URL της παρουσίας SearXNG σας (για παράδειγμα http://192.168.11.102:8888). Χρησιμοποιείται όταν η αναζήτηση ιστού έχει οριστεί σε SearXNG."
         }
       }
     }
@@ -135,6 +167,12 @@
       "mcp_assist_se": {
         "name": "{profile_name}"
       }
+    }
+  },
+  "services": {
+    "reload_external_custom_tools": {
+      "name": "Επαναφόρτωση εξωτερικών προσαρμοσμένων εργαλείων",
+      "description": "Επαναφορτώνει πακέτα εξωτερικών προσαρμοσμένων εργαλείων χωρίς επανεκκίνηση του Home Assistant."
     }
   }
 }
