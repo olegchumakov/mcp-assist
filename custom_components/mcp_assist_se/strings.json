@@ -73,10 +73,13 @@
           "enable_external_custom_tools": "Enable External Custom Tools",
           "enable_calculator_tools": "Enable Calculator Tools",
           "enable_unit_conversion_tools": "Enable Unit Conversion Tools",
-          "enable_memory_tools": "Enable Persistent Memory Tools"
+          "enable_memory_tools": "Enable Persistent Memory Tools",
+          "searxng_url": "SearXNG URL",
+          "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
         },
         "data_description": {
-          "enable_memory_tools": "Lets the assistant remember, recall and forget user-approved facts and preferences. Memories persist until you ask to forget them."
+          "enable_memory_tools": "Lets the assistant remember, recall and forget user-approved facts and preferences. Memories persist until you ask to forget them.",
+          "searxng_url": "Base URL of your SearXNG instance (for example, http://192.168.11.102:8888). Used when Web Search is set to SearXNG."
         }
       }
     },
@@ -149,10 +152,12 @@
           "enable_calculator_tools": "Enable Calculator Tools",
           "enable_unit_conversion_tools": "Enable Unit Conversion Tools",
           "enable_memory_tools": "Enable Persistent Memory Tools",
-          "max_entities_per_discovery": "Max Entities Per Discovery (20-500)"
+          "max_entities_per_discovery": "Max Entities Per Discovery (20-500)",
+          "searxng_url": "SearXNG URL"
         },
         "data_description": {
-          "enable_memory_tools": "Lets the assistant remember, recall and forget user-approved facts and preferences. Memories persist until you ask to forget them."
+          "enable_memory_tools": "Lets the assistant remember, recall and forget user-approved facts and preferences. Memories persist until you ask to forget them.",
+          "searxng_url": "Base URL of your SearXNG instance (for example, http://192.168.11.102:8888). Used when Web Search is set to SearXNG."
         }
       }
     }
