@@ -402,7 +402,11 @@ class IndexManager:
                 label_areas[label_id].add(area_entry.id)
 
         label_devices = defaultdict(set)
-        for device_entry in device_reg.devices.values():
+        # HA 2026.9+: registry.devices iterates DeviceEntry objects directly;
+        # older HA exposes a dict (device_id -> entry) and needs .values().
+        _raw_devices = device_reg.devices
+        _device_entries = _raw_devices.values() if isinstance(_raw_devices, dict) else _raw_devices
+        for device_entry in _device_entries:
             for label_id in getattr(device_entry, "labels", set()) or set():
                 label_devices[label_id].add(device_entry.id)
 
