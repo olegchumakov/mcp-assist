@@ -101,6 +101,9 @@ from .const import (
     DEFAULT_HERMES_URL,
     DEFAULT_HERMES_SESSION_KEY,
     DEFAULT_HERMES_MODEL,
+    CONF_ENABLE_MEMORY_TOOLS,
+    DEFAULT_ENABLE_MEMORY_TOOLS,
+    MEMORY_TECHNICAL_INSTRUCTIONS,
     MIN_REASONING_COMPLETION_TOKENS,
 )
 from .conversation_history import ConversationHistory
@@ -242,6 +245,16 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         # Return default
         return default
+
+    @property
+    def memory_tools_enabled(self) -> bool:
+        """Get effective persistent memory tool setting (shared setting)."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_MEMORY_TOOLS,
+                DEFAULT_ENABLE_MEMORY_TOOLS,
+            )
+        )
 
     # Dynamic configuration properties - read from entry.options/data each time
     @property
@@ -1438,6 +1451,15 @@ class MCPAssistConversationEntity(ConversationEntity):
             technical_prompt = technical_prompt.replace(
                 "{response_mode}", mode_instructions
             )
+
+            # Inject persistent memory tool instructions
+            if self.memory_tools_enabled:
+                technical_prompt += "\n\n" + MEMORY_TECHNICAL_INSTRUCTIONS.strip()
+            else:
+                technical_prompt += (
+                    "\n\nMemory tools are disabled. Do not call remember_memory, "
+                    "recall_memories, or forget_memory."
+                )
 
             # Get Smart Entity Index from IndexManager
             index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")

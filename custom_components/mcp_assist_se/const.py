@@ -234,3 +234,16 @@ For ANY device request:
 Current area: {current_area}
 Current time: {time}
 Current date: {date}"""
+
+
+# --- Persistent memory tools (ported from upstream PR #45; no-expiry variant) ---
+CONF_ENABLE_MEMORY_TOOLS = "enable_memory_tools"
+DEFAULT_ENABLE_MEMORY_TOOLS = False
+
+MEMORY_TECHNICAL_INSTRUCTIONS = """
+Memory tools are enabled.
+- Use remember_memory only when the user explicitly asks you to remember something.
+- Use recall_memories for stored facts or preferences.
+- Use forget_memory when the user asks to remove or update stored memory.
+- Memories persist until the user explicitly asks to forget them; there is no automatic expiry.
+"""

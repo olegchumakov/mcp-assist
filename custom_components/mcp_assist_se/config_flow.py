@@ -48,6 +48,7 @@ from .const import (
     CONF_DEBUG_MODE,
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    CONF_ENABLE_MEMORY_TOOLS,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_BRAVE_API_KEY,
@@ -105,6 +106,7 @@ from .const import (
     DEFAULT_DEBUG_MODE,
     DEFAULT_ENABLE_CUSTOM_TOOLS,
     DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_ENABLE_MEMORY_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
     DEFAULT_BRAVE_API_KEY,
@@ -1216,6 +1218,16 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
                 ): bool,
                 vol.Optional(
+                    CONF_ENABLE_MEMORY_TOOLS,
+                    default=sys_options.get(
+                        CONF_ENABLE_MEMORY_TOOLS,
+                        sys_data.get(
+                            CONF_ENABLE_MEMORY_TOOLS,
+                            DEFAULT_ENABLE_MEMORY_TOOLS,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
                     CONF_MAX_ENTITIES_PER_DISCOVERY,
                     default=DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
                 ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
@@ -1900,6 +1912,16 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                         sys_data.get(
                             CONF_ENABLE_UNIT_CONVERSION_TOOLS,
                             DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_MEMORY_TOOLS,
+                    default=sys_options.get(
+                        CONF_ENABLE_MEMORY_TOOLS,
+                        sys_data.get(
+                            CONF_ENABLE_MEMORY_TOOLS,
+                            DEFAULT_ENABLE_MEMORY_TOOLS,
                         ),
                     ),
                 ): bool,
