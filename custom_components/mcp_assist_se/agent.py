@@ -107,6 +107,7 @@ from .const import (
     MIN_REASONING_COMPLETION_TOKENS,
 )
 from .conversation_history import ConversationHistory
+from .localization import get_goodbye_response
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -906,6 +907,17 @@ class MCPAssistConversationEntity(ConversationEntity):
         try:
             _LOGGER.debug("Conversation ID: %s", conversation_id)
 
+            # End words: finish the conversation instantly with a local
+            # goodbye instead of spending an LLM round-trip on it.
+            if self._detect_user_ending_intent(user_input.text):
+                if self.debug_mode:
+                    _LOGGER.info(
+                        "🎯 End word detected - responding locally, no LLM call"
+                    )
+                return self._build_end_word_result(
+                    user_input, conversation_id
+                )
+
             # OpenClaw: bypass entire LLM/MCP pipeline — server handles everything
             if self.server_type == SERVER_TYPE_OPENCLAW:
                 return await self._handle_openclaw_message(user_input, conversation_id)
@@ -1186,6 +1198,20 @@ class MCPAssistConversationEntity(ConversationEntity):
         if resp.status == 400 and "session" in message.lower():
             raise HermesSessionError(message)
         raise RuntimeError(f"Hermes request failed ({resp.status}): {message}")
+
+    def _build_end_word_result(
+        self, user_input: ConversationInput, conversation_id: str
+    ) -> ConversationResult:
+        """Instantly close the conversation on an end word, without the LLM."""
+        goodbye = get_goodbye_response(user_input.language, user_input.text)
+        self.history.add_turn(conversation_id, user_input.text, goodbye)
+        intent_response = intent.IntentResponse(language=user_input.language)
+        intent_response.async_set_speech(self._clean_text_for_tts(goodbye))
+        return ConversationResult(
+            response=intent_response,
+            conversation_id=conversation_id,
+            continue_conversation=False,
+        )
 
     async def _build_response_result(
         self,

@@ -102,6 +102,66 @@ END_WORDS = {
 }
 
 
+# Local instant-goodbye replies used when an end word closes the conversation
+# without calling the LLM. "bye" is used for farewells, "thanks" for gratitude.
+GOODBYE_RESPONSES = {
+    "en": {"bye": "Goodbye!", "thanks": "You're welcome!"},
+    "ru": {"bye": "До свидания!", "thanks": "Пожалуйста!"},
+    "de": {"bye": "Auf Wiedersehen!", "thanks": "Gern geschehen!"},
+    "fr": {"bye": "Au revoir!", "thanks": "Avec plaisir!"},
+    "es": {"bye": "¡Adiós!", "thanks": "¡De nada!"},
+    "it": {"bye": "Arrivederci!", "thanks": "Prego!"},
+    "nl": {"bye": "Tot ziens!", "thanks": "Graag gedaan!"},
+    "pl": {"bye": "Do widzenia!", "thanks": "Nie ma za co!"},
+    "pt": {"bye": "Adeus!", "thanks": "De nada!"},
+    "zh-hans": {"bye": "再见！", "thanks": "不客气！"},
+    "ja": {"bye": "さようなら！", "thanks": "どういたしまして！"},
+    "ko": {"bye": "안녕히 가세요!", "thanks": "천만에요!"},
+    "sv": {"bye": "Hej då!", "thanks": "Varsågod!"},
+    "nb": {"bye": "Ha det bra!", "thanks": "Bare hyggelig!"},
+    "da": {"bye": "Farvel!", "thanks": "Selv tak!"},
+    "fi": {"bye": "Näkemiin!", "thanks": "Ole hyvä!"},
+    "cs": {"bye": "Na shledanou!", "thanks": "Není zač!"},
+    "el": {"bye": "Αντίο!", "thanks": "Παρακαλώ!"},
+    "tr": {"bye": "Hoşça kal!", "thanks": "Rica ederim!"},
+    "fil": {"bye": "Paalam!", "thanks": "Walang anuman!"},
+    "ar": {"bye": "مع السلامة!", "thanks": "على الرحب والسعة!"},
+    "hi": {"bye": "अलविदा!", "thanks": "आपका स्वागत है!"},
+}
+
+# Substrings that mark the farewell as a "thank you" rather than a goodbye
+_THANKS_MARKERS = (
+    "thank", "спасиб", "danke", "merci", "gracias", "grazie", "dank",
+    "dzię", "dzięk", "obrigad", "谢谢", "ありがと", "고마", "감사",
+    "tack", "kiitos", "děku", "ευχαρισ", "teşekk", "salamat", "शुक्र",
+    "شكرا",
+)
+
+
+def get_goodbye_response(language_code: str, user_text: str = "") -> str:
+    """Get an instant local reply for a conversation ended by an end word.
+
+    Args:
+        language_code: ISO 639-1 language code (e.g., "de", "ru", "zh-Hans").
+        user_text: The user message that triggered the ending; used to pick a
+            "you're welcome" style reply for gratitude phrases.
+
+    Returns:
+        A short goodbye / you're-welcome phrase in the user's language.
+        Falls back to English if the language is not found.
+    """
+    base_code = language_code.lower()
+    if "-" in base_code and base_code not in GOODBYE_RESPONSES:
+        base_code = base_code.split("-")[0]
+
+    phrases = GOODBYE_RESPONSES.get(base_code, GOODBYE_RESPONSES["en"])
+
+    text_lower = (user_text or "").lower()
+    if any(marker in text_lower for marker in _THANKS_MARKERS):
+        return phrases["thanks"]
+    return phrases["bye"]
+
+
 def get_language_instruction(language_code: str) -> str:
     """Generate language-specific system prompt.
 
