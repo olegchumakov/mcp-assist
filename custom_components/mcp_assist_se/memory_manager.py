@@ -8,7 +8,6 @@ automatic pruning of stored memories.
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +15,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
+from .memory_rank import normalize_text, public_memory, rank_memories, round_vector
 
 _STORAGE_VERSION = 1
 _STORAGE_KEY = f"{DOMAIN}_memory_store"
@@ -52,11 +52,11 @@ class MemoryManager:
         category: str | None = None,
     ) -> dict[str, Any]:
         """Store a memory entry that persists until explicitly forgotten."""
-        normalized_text = self._normalize_text(text)
+        normalized_text = normalize_text(text)
         if not normalized_text:
             raise ValueError("memory text is required")
 
-        normalized_category = self._normalize_text(category)
+        normalized_category = normalize_text(category)
 
         async with self._lock:
             await self._ensure_loaded_locked()
@@ -79,20 +79,20 @@ class MemoryManager:
         limit: int = 5,
     ) -> dict[str, Any]:
         """Recall memories by query or category."""
-        normalized_query = self._normalize_text(query)
-        normalized_category = self._normalize_text(category)
+        normalized_query = normalize_text(query)
+        normalized_category = normalize_text(category)
         effective_limit = max(1, int(limit))
 
         async with self._lock:
             await self._ensure_loaded_locked()
             memories = list(self._memories)
 
-        ranked = self._rank_memories(
+        ranked = rank_memories(
             memories,
             query=normalized_query,
             category=normalized_category,
         )
-        items = ranked[:effective_limit]
+        items = [public_memory(item) for item in ranked[:effective_limit]]
         return {
             "items": items,
             "total_found": len(ranked),
@@ -109,9 +109,9 @@ class MemoryManager:
         delete_all_matches: bool = False,
     ) -> dict[str, Any]:
         """Forget one or more memories by id or search criteria."""
-        normalized_id = self._normalize_text(memory_id)
-        normalized_query = self._normalize_text(query)
-        normalized_category = self._normalize_text(category)
+        normalized_id = normalize_text(memory_id)
+        normalized_query = normalize_text(query)
+        normalized_category = normalize_text(category)
         if not normalized_id and not normalized_query and not normalized_category:
             raise ValueError("memory_id or query/category is required")
 
@@ -123,7 +123,7 @@ class MemoryManager:
             if normalized_id:
                 target_ids = {normalized_id}
             else:
-                ranked = self._rank_memories(
+                ranked = rank_memories(
                     list(self._memories),
                     query=normalized_query,
                     category=normalized_category,
@@ -141,7 +141,7 @@ class MemoryManager:
             kept: list[dict[str, Any]] = []
             for memory in self._memories:
                 if memory["id"] in target_ids:
-                    deleted.append(dict(memory))
+                    deleted.append(public_memory(memory))
                 else:
                     kept.append(memory)
 
@@ -159,11 +159,38 @@ class MemoryManager:
         async with self._lock:
             await self._ensure_loaded_locked()
             items = sorted(
-                (dict(item) for item in self._memories),
+                (public_memory(item) for item in self._memories),
                 key=lambda item: item.get("created_at", ""),
                 reverse=True,
             )
         return items
+
+    async def async_list_raw(self) -> list[dict[str, Any]]:
+        """Return stored memories, including cached embeddings."""
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            return [dict(item) for item in self._memories]
+
+    async def async_set_embeddings(
+        self,
+        updates: dict[str, list[float]],
+        model_key: str,
+    ) -> None:
+        """Cache vectors for memories. ``model_key`` is stored with each vector."""
+        if not updates:
+            return
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            changed = False
+            for memory in self._memories:
+                vector = updates.get(memory["id"])
+                if vector is None:
+                    continue
+                memory["embedding"] = round_vector(vector)
+                memory["embedding_model"] = model_key
+                changed = True
+            if changed:
+                await self._save_locked()
 
     async def _ensure_loaded_locked(self) -> None:
         """Load persisted storage on first use."""
@@ -188,73 +215,24 @@ class MemoryManager:
         if not isinstance(item, dict):
             return None
 
-        memory_id = self._normalize_text(item.get("id"))
-        text = self._normalize_text(item.get("text"))
-        created_at = self._normalize_text(item.get("created_at"))
+        memory_id = normalize_text(item.get("id"))
+        text = normalize_text(item.get("text"))
+        created_at = normalize_text(item.get("created_at"))
         if not memory_id or not text or not created_at:
             return None
 
-        return {
+        loaded: dict[str, Any] = {
             "id": memory_id,
             "text": text,
-            "category": self._normalize_text(item.get("category")),
+            "category": normalize_text(item.get("category")),
             "created_at": created_at,
         }
-
-    def _rank_memories(
-        self,
-        memories: list[dict[str, Any]],
-        *,
-        query: str | None,
-        category: str | None,
-    ) -> list[dict[str, Any]]:
-        """Rank memories by relevance and recency."""
-        if not memories:
-            return []
-
-        filtered = memories
-        if category:
-            filtered = [
-                item
-                for item in filtered
-                if self._normalize_text(item.get("category")) == category
-            ]
-
-        if not query:
-            return sorted(
-                (dict(item) for item in filtered),
-                key=lambda item: item.get("created_at", ""),
-                reverse=True,
-            )
-
-        query_lower = query.casefold()
-        terms = [term for term in re.findall(r"\w+", query_lower) if term]
-        ranked: list[tuple[int, str, dict[str, Any]]] = []
-        for memory in filtered:
-            haystack_parts = [
-                str(memory.get("text") or ""),
-                str(memory.get("category") or ""),
-            ]
-            haystack = " ".join(haystack_parts).casefold()
-            score = 0
-            if query_lower in haystack:
-                score += 100
-            for term in terms:
-                if term in haystack:
-                    score += 10
-            if terms and all(term in haystack for term in terms):
-                score += 25
-            if not score:
-                continue
-            ranked.append((score, str(memory.get("created_at") or ""), dict(memory)))
-
-        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return [item[2] for item in ranked]
-
-    @staticmethod
-    def _normalize_text(value: Any) -> str | None:
-        """Normalize a text value for storage and search."""
-        if value is None:
-            return None
-        normalized = " ".join(str(value).split()).strip()
-        return normalized or None
+        embedding_model = normalize_text(item.get("embedding_model"))
+        embedding = item.get("embedding")
+        if embedding_model and isinstance(embedding, list) and embedding:
+            try:
+                loaded["embedding"] = round_vector(embedding)
+                loaded["embedding_model"] = embedding_model
+            except (TypeError, ValueError):
+                pass
+        return loaded

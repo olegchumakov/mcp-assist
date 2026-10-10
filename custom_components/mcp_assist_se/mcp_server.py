@@ -29,12 +29,15 @@ from .const import (
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_ENABLE_MEMORY_TOOLS,
+    CONF_ENABLE_PERSONALITY,
     DEFAULT_ENABLE_MEMORY_TOOLS,
+    DEFAULT_ENABLE_PERSONALITY,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
 )
-from .memory_manager import MemoryManager
+from .memory_rank import looks_like_personality_request
+from .runtime import get_assist_runtime
 from .discovery import EntityDiscovery
 from .domain_registry import (
     validate_domain_action,
@@ -154,7 +157,6 @@ class MCPServer:
 
         # Custom tools will be initialized in start() after system entry exists
         self.custom_tools = None
-        self.memory_manager = MemoryManager(hass)
 
     def _get_shared_setting(self, key: str, default: Any) -> Any:
         """Get a shared setting from system entry with fallback to profile entry."""
@@ -243,12 +245,18 @@ class MCPServer:
             except Exception as e:
                 _LOGGER.error(f"Failed to initialize custom tools: {e}")
 
-            if self._memory_tools_enabled():
+            if self._memory_tools_enabled() or self._personality_enabled():
+                runtime = get_assist_runtime(self.hass)
                 try:
-                    await self.memory_manager.async_initialize()
-                    _LOGGER.info("Memory tools initialized (persist until forgotten)")
+                    if self._memory_tools_enabled():
+                        await runtime.memory.async_initialize()
+                        _LOGGER.info("Memory tools initialized (persist until forgotten)")
+                        runtime.embeddings.schedule_prepare()
+                    if self._personality_enabled():
+                        await runtime.personality.async_initialize()
+                        _LOGGER.info("Personality block initialized")
                 except Exception as err:
-                    _LOGGER.error("Failed to initialize memory tools: %s", err)
+                    _LOGGER.error("Failed to initialize memory or personality: %s", err)
 
             _LOGGER.info(
                 "✅ MCP server started successfully on http://0.0.0.0:%d", self.port
@@ -290,10 +298,6 @@ class MCPServer:
             await self.custom_tools.shutdown()
             self.custom_tools = None
 
-        if self.memory_manager:
-            await self.memory_manager.async_shutdown()
-            self.memory_manager = None
-
         if self.site:
             await self.site.stop()
         if self.runner:
@@ -309,6 +313,20 @@ class MCPServer:
             }
 
         category = args.get("category")
+        if self._personality_enabled() and looks_like_personality_request(memory_text):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "This is a speaking-style or persona request, so it was not stored as a memory. "
+                            "Call set_personality_instruction now with that instruction. "
+                            "Personality instructions are injected into every later reply."
+                        ),
+                    }
+                ],
+            }
+
         self.publish_progress(
             "tool_start",
             "Storing memory",
@@ -316,7 +334,7 @@ class MCPServer:
         )
 
         try:
-            stored = await self.memory_manager.remember(
+            stored = await self._memory().remember(
                 memory_text,
                 category=category,
             )
@@ -332,6 +350,12 @@ class MCPServer:
             "Memory stored",
             tool="remember_memory",
             memory_id=stored["id"],
+        )
+        self.hass.async_create_task(
+            get_assist_runtime(self.hass).embeddings.async_embed_new_memory(
+                stored["id"],
+                stored["text"],
+            )
         )
 
         category_text = (
@@ -369,7 +393,7 @@ class MCPServer:
         )
 
         try:
-            result = await self.memory_manager.recall(
+            result = await self._memory().recall(
                 query=None if query is None else str(query),
                 category=None if category is None else str(category),
                 limit=limit,
@@ -431,7 +455,7 @@ class MCPServer:
         )
 
         try:
-            result = await self.memory_manager.forget(
+            result = await self._memory().forget(
                 memory_id=None if memory_id is None else str(memory_id),
                 query=None if query is None else str(query),
                 category=None if category is None else str(category),
@@ -472,6 +496,106 @@ class MCPServer:
             "content": [{"type": "text", "text": "\n".join(lines)}],
             "deleted_count": result["deleted_count"],
             "deleted": deleted,
+        }
+
+    def _format_personality_lines(self, instructions: list) -> str:
+        """Format personality instructions for a tool result."""
+        if not instructions:
+            return "Personality block is empty."
+        lines = ["Personality instructions:"]
+        for item in instructions:
+            lines.append(f"- {item['id']}: {item['text']}")
+        return "\n".join(lines)
+
+    async def tool_view_personality(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the persisted personality instructions."""
+        del args
+        try:
+            instructions = await self._personality().async_view()
+        except Exception as err:
+            _LOGGER.error("Failed to read personality: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to read personality: {err}"}],
+                "isError": True,
+            }
+        return {
+            "content": [
+                {"type": "text", "text": self._format_personality_lines(instructions)}
+            ],
+            "instructions": instructions,
+        }
+
+    async def tool_set_personality_instruction(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Add or replace one personality instruction."""
+        text = " ".join(str(args.get("instruction") or "").split()).strip()
+        instruction_id = args.get("instruction_id")
+        try:
+            result = await self._personality().async_set(
+                text,
+                instruction_id=None if instruction_id is None else str(instruction_id),
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to update personality: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to update personality: {err}"}],
+                "isError": True,
+            }
+        return {
+            "content": [{"type": "text", "text": result["message"]}],
+            "isError": not result.get("ok", False),
+            "instructions": result.get("instructions", []),
+        }
+
+    async def tool_remove_personality_instruction(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Remove one personality instruction."""
+        instruction_id = args.get("instruction_id")
+        query = args.get("query")
+        try:
+            result = await self._personality().async_remove(
+                instruction_id=None if instruction_id is None else str(instruction_id),
+                query=None if query is None else str(query),
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to remove personality instruction: %s", err)
+            return {
+                "content": [
+                    {"type": "text", "text": f"Failed to remove personality instruction: {err}"}
+                ],
+                "isError": True,
+            }
+        return {
+            "content": [{"type": "text", "text": result["message"]}],
+            "isError": not result.get("ok", False),
+            "removed": result.get("removed", []),
+        }
+
+    async def tool_reset_personality(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Clear the personality block when confirm is true."""
+        if not bool(args.get("confirm")):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Pass confirm=true to erase every personality instruction.",
+                    }
+                ],
+                "isError": True,
+            }
+        try:
+            result = await self._personality().async_reset()
+        except Exception as err:
+            _LOGGER.error("Failed to reset personality: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to reset personality: {err}"}],
+                "isError": True,
+            }
+        return {
+            "content": [{"type": "text", "text": result["message"]}],
+            "removed_count": result.get("removed_count", 0),
         }
 
     def _is_ip_allowed(self, client_ip: str) -> bool:
@@ -1040,6 +1164,95 @@ class MCPServer:
             )
         )
 
+    def _personality_enabled(self) -> bool:
+        """Return whether the personality block and its tools are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_PERSONALITY,
+                DEFAULT_ENABLE_PERSONALITY,
+            )
+        )
+
+    def _memory(self):
+        """Shared memory store."""
+        return get_assist_runtime(self.hass).memory
+
+    def _personality(self):
+        """Shared personality store."""
+        return get_assist_runtime(self.hass).personality
+
+    def _personality_tool_definitions(self) -> List[Dict[str, Any]]:
+        """Tool schemas for the personality block."""
+        return [
+            {
+                "name": "view_personality",
+                "description": "Read the persisted personality and behaviour instructions. These are injected into every reply.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "set_personality_instruction",
+                "description": "Add a speaking-style, persona, tone, or form-of-address instruction, or replace one when instruction_id is set. Use this for requests like 'talk to me like a pirate' or 'говори со мной как пират'. Do not store those with remember_memory. The instruction applies on later turns and should also be followed in this reply.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "instruction": {
+                            "type": "string",
+                            "description": "One short behaviour instruction, under 240 characters.",
+                        },
+                        "instruction_id": {
+                            "type": "string",
+                            "description": "Existing instruction id to replace. Omit to add a new instruction.",
+                        },
+                    },
+                    "required": ["instruction"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "remove_personality_instruction",
+                "description": "Remove one personality instruction by id or by a short quote from its text.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "instruction_id": {
+                            "type": "string",
+                            "description": "Instruction id to remove.",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Text contained by the instruction to remove, used when the id is not known.",
+                        },
+                    },
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "reset_personality",
+                "description": "Erase every personality instruction. Pass confirm=true. Use this when the user wants the default voice back.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Must be true to clear the personality block.",
+                        }
+                    },
+                    "required": ["confirm"],
+                    "additionalProperties": False,
+                },
+            },
+        ]
+
     def _coerce_int_arg(
         self, value: Any, *, default: int, minimum: int, maximum: int
     ) -> int:
@@ -1343,7 +1556,7 @@ class MCPServer:
                 [
                     {
                         "name": "remember_memory",
-                        "description": "Store a fact, preference, or instruction for later recall. Use this only when the user explicitly asks you to remember something. Memories persist until the user asks you to forget them.",
+                        "description": "Store a fact or preference for later recall. Use this only when the user explicitly asks you to remember something about people, the home, devices, schedules, or favourites. Do not use it for speaking style or persona; use set_personality_instruction for that. Memories persist until the user asks you to forget them.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1363,7 +1576,7 @@ class MCPServer:
                     },
                     {
                         "name": "recall_memories",
-                        "description": "Search stored memories by query or category, or list recent memories when no query is given. Use this for requests like 'what do you remember about my coffee preference?'",
+                        "description": "Search stored facts by query or category, or list recent facts when no query is given. Relevant facts are already injected into the prompt when they match the current request. Use this when the user asks what you remember, or when those injected facts are not enough.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1420,6 +1633,9 @@ class MCPServer:
                 ]
             )
 
+        if self._personality_enabled():
+            tools.extend(self._personality_tool_definitions())
+
         # Add custom tool definitions if enabled
         if self.custom_tools:
             try:
@@ -1467,6 +1683,14 @@ class MCPServer:
             return await self.tool_recall_memories(arguments)
         elif tool_name == "forget_memory":
             return await self.tool_forget_memory(arguments)
+        elif tool_name == "view_personality":
+            return await self.tool_view_personality(arguments)
+        elif tool_name == "set_personality_instruction":
+            return await self.tool_set_personality_instruction(arguments)
+        elif tool_name == "remove_personality_instruction":
+            return await self.tool_remove_personality_instruction(arguments)
+        elif tool_name == "reset_personality":
+            return await self.tool_reset_personality(arguments)
         elif tool_name == "get_entity_history":
             return await self.tool_get_entity_history(arguments)
         else:

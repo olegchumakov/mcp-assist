@@ -130,6 +130,7 @@ known_devices.yaml
 
 # Development/Test files
 test_*.py
+!tests/**/test_*.py
 test_*.sh
 restart_ha.py
 monitor_mcp.sh

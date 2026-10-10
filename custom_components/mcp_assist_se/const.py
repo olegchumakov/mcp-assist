@@ -240,10 +240,46 @@ Current date: {date}"""
 CONF_ENABLE_MEMORY_TOOLS = "enable_memory_tools"
 DEFAULT_ENABLE_MEMORY_TOOLS = False
 
+# Personality block and automatic retrieval. Missing keys use these defaults,
+# so an existing install keeps its memories and gains the new behaviour.
+CONF_ENABLE_PERSONALITY = "enable_personality"
+DEFAULT_ENABLE_PERSONALITY = True
+CONF_MEMORY_AUTO_RETRIEVE = "memory_auto_retrieve"
+DEFAULT_MEMORY_AUTO_RETRIEVE = True
+CONF_MEMORY_TOP_K = "memory_top_k"
+DEFAULT_MEMORY_TOP_K = 4
+CONF_MEMORY_SIMILARITY_THRESHOLD = "memory_similarity_threshold"
+# Tuned on sergeyzh/rubert-tiny-turbo. Related short phrases land around
+# 0.83-0.95 and unrelated ones around 0.60-0.74. Raise it if the wrong
+# fact is injected. multilingual-e5-small may need a different value.
+DEFAULT_MEMORY_SIMILARITY_THRESHOLD = 0.78
+CONF_MEMORY_INCLUDE_LAST_TURN = "memory_include_last_turn"
+DEFAULT_MEMORY_INCLUDE_LAST_TURN = True
+CONF_EMBEDDING_PROVIDER = "embedding_provider"
+EMBEDDING_PROVIDER_LOCAL = "local"
+EMBEDDING_PROVIDER_OPENAI = "openai"
+DEFAULT_EMBEDDING_PROVIDER = EMBEDDING_PROVIDER_LOCAL
+CONF_LOCAL_EMBEDDING_MODEL = "local_embedding_model"
+DEFAULT_LOCAL_EMBEDDING_MODEL = "sergeyzh/rubert-tiny-turbo"
+LOCAL_EMBEDDING_MODEL_E5 = "intfloat/multilingual-e5-small"
+CONF_EMBEDDING_MODEL = "embedding_model"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+CONF_EMBEDDING_BASE_URL = "embedding_base_url"
+DEFAULT_EMBEDDING_BASE_URL = ""
+
 MEMORY_TECHNICAL_INSTRUCTIONS = """
 Memory tools are enabled.
-- Use remember_memory only when the user explicitly asks you to remember something.
-- Use recall_memories for stored facts or preferences.
-- Use forget_memory when the user asks to remove or update stored memory.
-- Memories persist until the user explicitly asks to forget them; there is no automatic expiry.
+- Store a fact or preference with remember_memory only when the user explicitly asks you to remember something about people, the home, devices, schedules, or favourites.
+- Do not use remember_memory for speaking style, persona, tone, or how to address the user. Those go in the personality block with set_personality_instruction.
+- Relevant memories are injected automatically as "Remembered facts" when they match the current request. Use them. Call recall_memories only when the user asks what you remember, or when the injected facts are not enough.
+- Use forget_memory when the user asks you to forget a stored fact.
+- Memories persist until the user explicitly asks to forget them. There is no automatic expiry.
+"""
+
+PERSONALITY_TECHNICAL_INSTRUCTIONS = """
+Personality tools are enabled.
+- Speaking style, persona, tone, and forms of address live in the personality block and are applied on every later turn.
+- Use view_personality to read it, set_personality_instruction to add or replace one instruction, remove_personality_instruction to delete one, and reset_personality to clear it.
+- A request such as "talk to me like a pirate" or "говори со мной как пират" updates the personality block. It is not a memory.
+- If the user replaces a style, replace the existing instruction or reset the block. Do not keep contradictory styles.
 """

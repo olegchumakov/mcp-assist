@@ -56,6 +56,25 @@ Instead of dumping all entities, MCP Assist:
 
 The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your Home Assistant system structure, enabling context-aware queries without full entity dumps. The index includes areas, domains, device classes, people, calendars, zones, automations, and scripts. For entities without standardized device_class attributes (like custom integrations), LLM-powered gap-filling automatically infers semantic categories from naming patterns. This results in faster, more accurate queries that use ~95% fewer tokens compared to traditional entity dumps.
 
+## Memory and personality (v0.22.0+)
+
+Two additions for a voice assistant that should remember facts and keep a speaking style:
+
+- **Personality block.** A short, persisted list of behaviour instructions (tone, persona, how to address you). It is injected into every system prompt, next to your configured system prompt. Change it by voice: "talk to me like a pirate" or "говори со мной как пират". Facts stay in normal memory.
+- **Automatic memory retrieval.** Before each model call, stored memories are compared with what you just said (and, by default, your previous turn). The closest matches above a similarity threshold are injected as remembered facts. `recall_memories` and `forget_memory` still work when you ask explicitly.
+
+Embeddings are computed **on this Home Assistant** by default. Nothing is sent to an embedding API unless you switch the provider.
+
+The default model is [`sergeyzh/rubert-tiny-turbo`](https://huggingface.co/sergeyzh/rubert-tiny-turbo): a Russian sentence model, about 29M parameters, 312 dimensions, 3 layers. First run downloads **about 118 MB** into `/config/mcp_assist_se/models/` and then keeps **about 180 MB** of RAM while it is loaded. Loading is lazy and happens in a background thread, so the conversation is not blocked. Until the model is ready, retrieval falls back to the existing keyword ranker. Later turns use the cached vectors. Vectors are stored on each memory together with the model id, so changing the model recomputes them. Existing memories and settings are kept; there is no storage migration that deletes data.
+
+ONNX Runtime is not used. It has no musl wheels, and Home Assistant OS is Alpine, so it would fail to install. The integration runs the BERT network with NumPy plus the `tokenizers` and `safetensors` packages, which publish wheels for x86_64 and aarch64 on both musl and glibc. PyTorch is not installed.
+
+Optional local model: `intfloat/multilingual-e5-small` (multilingual, 384 dimensions, **about 490 MB** download, **about 700 MB** RAM, 12 layers, slower on a small CPU such as an Intel N150). It expects `query:` / `passage:` prefixes; the integration adds those. Its similarity scores sit higher, so raise the threshold toward **0.75** if unrelated facts appear.
+
+Optional remote provider: OpenAI-compatible `POST /v1/embeddings`. Leave the base URL empty to reuse the profile's chat server. Set the embedding model to one that server actually serves (`text-embedding-3-small` on OpenAI itself). A gateway such as `https://openai.bothub.chat` will not embed unless that model id is enabled there. If the call fails or times out (2.5 seconds), keyword matching is used and the reply still goes out.
+
+See [docs/memory.md](docs/memory.md) for the tools and settings.
+
 ## Multilingual Support (v0.12.0+)
 
 MCP Assist supports **21 languages** with localized configuration interfaces, language-aware system prompts, and region-specific speech detection patterns. The integration automatically detects your Home Assistant system language and provides appropriate defaults for system prompts, follow-up phrases, and end conversation words. Supported languages include: Arabic, Chinese (Simplified), Czech, Danish, Dutch, Finnish, Filipino, French, German, Greek, Hindi, Italian, Japanese, Korean, Norwegian, Polish, Portuguese, Russian, Spanish, Swedish, and Turkish.
@@ -70,7 +89,7 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
 
 ### Home Assistant 2026.10
 
-Version 0.21.5 records conversation tool results with the Home Assistant 2026.10 chat log API (`llm.ToolResult` on `ToolResultContent.result`). Home Assistant 2026.9 and older still receive the previous `tool_result` payload. Device and label lookups use `async_entries_for_area` and `async_entries_for_label`, so 2026.10 no longer logs the deprecated `device_registry.devices` mapping warning.
+Version 0.22.0 records conversation tool results with the Home Assistant 2026.10 chat log API (`llm.ToolResult` on `ToolResultContent.result`). Home Assistant 2026.9 and older still receive the previous `tool_result` payload. Device and label lookups use `async_entries_for_area` and `async_entries_for_label`, so 2026.10 no longer logs the deprecated `device_registry.devices` mapping warning.
 
 ## Installation
 
@@ -263,6 +282,25 @@ MCP Assist has two types of settings:
 - Brave API key
 - Allowed IPs/CIDR ranges
 - Smart entity index (gap-filling)
+- Persistent memory tools, automatic retrieval, embedding model, and the personality block
+
+### Memory and personality settings
+
+Open the integration options, finish the shared MCP page, then open **Memory and personality**:
+
+| Setting | Default | What to do |
+| --- | --- | --- |
+| Enable personality block | On | Leave on. Say how you want to be spoken to. |
+| Retrieve relevant memories automatically | On | Leave on so facts are injected without a tool call. |
+| Memories to inject | 4 | Lower it if prompts get crowded. |
+| Similarity threshold | 0.78 | Tuned for rubert-tiny-turbo. Related phrases score about 0.83-0.95; unrelated ones about 0.60-0.74. Raise it if the wrong fact is injected. |
+| Include the previous user turn | On | Helps follow-ups such as "turn that on". |
+| Embedding provider | Local | Keep Local. Switch to OpenAI-compatible only if you want `/v1/embeddings`. |
+| Local embedding model | rubert-tiny-turbo | Right default for Russian on a small CPU. |
+| Remote embedding model | text-embedding-3-small | Only for the remote provider. Must exist on that server. |
+| Remote embedding base URL | empty | Empty uses the profile chat URL, for example `https://openai.bothub.chat`. |
+
+After upgrading, reload the integration or restart Home Assistant once so the model download can start. The first conversations still work; they use keyword matching until the file is on disk and loaded. Watch the log for `Local embedding model ready`.
 
 When you change shared settings in one profile's options, they apply to all profiles. This is intentional since all profiles share the same MCP server.
 

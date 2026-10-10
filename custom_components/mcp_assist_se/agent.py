@@ -102,8 +102,13 @@ from .const import (
     DEFAULT_HERMES_SESSION_KEY,
     DEFAULT_HERMES_MODEL,
     CONF_ENABLE_MEMORY_TOOLS,
+    CONF_ENABLE_PERSONALITY,
+    CONF_MEMORY_AUTO_RETRIEVE,
     DEFAULT_ENABLE_MEMORY_TOOLS,
+    DEFAULT_ENABLE_PERSONALITY,
+    DEFAULT_MEMORY_AUTO_RETRIEVE,
     MEMORY_TECHNICAL_INSTRUCTIONS,
+    PERSONALITY_TECHNICAL_INSTRUCTIONS,
     MIN_REASONING_COMPLETION_TOKENS,
 )
 from .conversation_history import ConversationHistory
@@ -255,6 +260,26 @@ class MCPAssistConversationEntity(ConversationEntity):
             self._get_shared_setting(
                 CONF_ENABLE_MEMORY_TOOLS,
                 DEFAULT_ENABLE_MEMORY_TOOLS,
+            )
+        )
+
+    @property
+    def personality_enabled(self) -> bool:
+        """Get whether the personality block is injected and editable."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_PERSONALITY,
+                DEFAULT_ENABLE_PERSONALITY,
+            )
+        )
+
+    @property
+    def memory_auto_retrieve_enabled(self) -> bool:
+        """Get whether relevant memories are injected before each reply."""
+        return bool(
+            self._get_shared_setting(
+                CONF_MEMORY_AUTO_RETRIEVE,
+                DEFAULT_MEMORY_AUTO_RETRIEVE,
             )
         )
 
@@ -474,6 +499,8 @@ class MCPAssistConversationEntity(ConversationEntity):
         return (
             self.mcp_port,
             self.search_provider,
+            self.memory_tools_enabled,
+            self.personality_enabled,
         )
 
     def _compact_tool_result_for_llm(self, tool_name: str, content: Any) -> str:
@@ -934,7 +961,9 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.debug("History retrieved: %d turns", len(history))
 
             # Build system prompt with context
-            system_prompt = await self._build_system_prompt_with_context(user_input)
+            system_prompt = await self._build_system_prompt_with_context(
+                user_input, history
+            )
             if self.debug_mode:
                 _LOGGER.info(
                     f"📝 System prompt built, length: {len(system_prompt)} chars"
@@ -1448,9 +1477,11 @@ class MCPAssistConversationEntity(ConversationEntity):
             return "Unknown"
 
     async def _build_system_prompt_with_context(
-        self, user_input: ConversationInput
+        self,
+        user_input: ConversationInput,
+        history: List[Dict[str, Any]] | None = None,
     ) -> str:
-        """Build system prompt with Smart Entity Index."""
+        """Build system prompt with Smart Entity Index, personality, and memories."""
         try:
             # Get base prompts (check options first, then data, then defaults)
             system_prompt = self.entry.options.get(
@@ -1480,13 +1511,23 @@ class MCPAssistConversationEntity(ConversationEntity):
                 "{response_mode}", mode_instructions
             )
 
-            # Inject persistent memory tool instructions
+            # Inject persistent memory and personality tool instructions
             if self.memory_tools_enabled:
                 technical_prompt += "\n\n" + MEMORY_TECHNICAL_INSTRUCTIONS.strip()
             else:
                 technical_prompt += (
                     "\n\nMemory tools are disabled. Do not call remember_memory, "
                     "recall_memories, or forget_memory."
+                )
+            if self.personality_enabled:
+                technical_prompt += (
+                    "\n\n" + PERSONALITY_TECHNICAL_INSTRUCTIONS.strip()
+                )
+            else:
+                technical_prompt += (
+                    "\n\nPersonality tools are disabled. Do not call "
+                    "view_personality, set_personality_instruction, "
+                    "remove_personality_instruction, or reset_personality."
                 )
 
             # Get Smart Entity Index from IndexManager
@@ -1501,12 +1542,64 @@ class MCPAssistConversationEntity(ConversationEntity):
             # Replace {index} placeholder
             technical_prompt = technical_prompt.replace("{index}", index_json)
 
-            # Combine: system prompt + technical prompt
-            return f"{system_prompt}\n\n{technical_prompt}"
+            personality_block = ""
+            if self.personality_enabled:
+                personality_block = await self._personality_prompt_block()
+
+            facts_block = ""
+            if self.memory_tools_enabled and self.memory_auto_retrieve_enabled:
+                facts_block = await self._remembered_facts_block(
+                    user_input.text, history or []
+                )
+
+            # Personality and retrieved facts sit after the entity index so
+            # they stay next to the conversation instead of being buried in it.
+            parts = [system_prompt, technical_prompt]
+            if personality_block:
+                parts.append(personality_block)
+            if facts_block:
+                parts.append(facts_block)
+            return "\n\n".join(parts)
 
         except Exception as e:
             _LOGGER.error("Error building system prompt: %s", e)
             return "You are a Home Assistant voice assistant. Use MCP tools to control devices."
+
+    async def _personality_prompt_block(self) -> str:
+        """Load the persisted personality block. Failures leave the prompt intact."""
+        try:
+            from .runtime import get_assist_runtime
+
+            return await get_assist_runtime(self.hass).personality.async_prompt_block()
+        except Exception as err:
+            _LOGGER.warning("Could not load personality block: %s", err)
+            return ""
+
+    async def _remembered_facts_block(
+        self, user_text: str, history: List[Dict[str, Any]]
+    ) -> str:
+        """Retrieve relevant memories for this utterance. Never raises."""
+        try:
+            from .memory_rank import format_remembered_facts
+            from .runtime import get_assist_runtime
+
+            previous = history[-1].get("user") if history else None
+            runtime = get_assist_runtime(self.hass)
+            runtime.embeddings.note_profile_endpoint(
+                self.base_url_dynamic, self.api_key or ""
+            )
+            result = await runtime.embeddings.async_retrieve(user_text, previous)
+            if result.mode != "skipped":
+                _LOGGER.info(
+                    "Memory retrieval mode=%s count=%d reason=%s",
+                    result.mode,
+                    len(result.items),
+                    result.reason,
+                )
+            return format_remembered_facts(result.items)
+        except Exception as err:
+            _LOGGER.warning("Automatic memory retrieval failed: %s", err)
+            return ""
 
     async def _get_home_context(self) -> str:
         """Get lightweight home context (areas and domains) to help LLM with discovery."""
