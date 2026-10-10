@@ -20,6 +20,7 @@ if "mcp_assist_se" not in sys.modules:
     package.__package__ = "mcp_assist_se"
     sys.modules["mcp_assist_se"] = package
 
+from mcp_assist_se.const import DEFAULT_MEMORY_AUTO_MERGE_THRESHOLD
 from mcp_assist_se.embedding_api import embeddings_url, parse_openai_embeddings
 from mcp_assist_se.local_embedder import (
     append_download_chunk,
@@ -481,10 +482,17 @@ class ForgetAndDedupeTests(unittest.TestCase):
             "old-light": {"new-light": 0.82, "old-name": 0.60, "new-name": 0.60, "title": 0.55},
             "new-light": {"old-light": 0.82, "old-name": 0.58, "new-name": 0.58, "title": 0.55},
         }
-        groups = plan_duplicate_merges(items, matrix, 0.91)
+        self.assertEqual(DEFAULT_MEMORY_AUTO_MERGE_THRESHOLD, 0.91)
+        groups = plan_duplicate_merges(
+            items, matrix, DEFAULT_MEMORY_AUTO_MERGE_THRESHOLD
+        )
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0]["keep"]["id"], "new-name")
         self.assertEqual([item["id"] for item in groups[0]["remove"]], ["old-name"])
+        removed = {item["id"] for group in groups for item in group["remove"]}
+        self.assertNotIn("title", removed)
+        self.assertNotIn("old-light", removed)
+        self.assertNotIn("new-light", removed)
 
     def test_merge_keeps_the_newest_text(self) -> None:
         items = [

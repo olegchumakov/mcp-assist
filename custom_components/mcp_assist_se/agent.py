@@ -114,6 +114,7 @@ from .const import (
 from .conversation_history import ConversationHistory
 from .ha_compat import build_tool_result_content
 from .localization import get_goodbye_response
+from .stream_tool_calls import finalize_streamed_tool_calls, merge_streamed_tool_fragment
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -842,29 +843,6 @@ class MCPAssistConversationEntity(ConversationEntity):
                 normalized_call["function"] = function
             normalized.append(normalized_call)
         return normalized
-
-    @staticmethod
-    def _normalize_stream_tool_call_index(
-        raw_index: Any,
-        stream_index_offset: int | None,
-    ) -> tuple[int, int]:
-        """Normalize streamed tool-call indexes that start above zero."""
-        try:
-            index = int(raw_index)
-        except (TypeError, ValueError):
-            index = 0
-
-        if stream_index_offset is None:
-            stream_index_offset = index
-
-        return max(0, index - stream_index_offset), stream_index_offset
-
-    @staticmethod
-    def _compact_streamed_tool_calls(
-        tool_calls: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Drop empty streamed tool-call placeholders before execution."""
-        return [tool_call for tool_call in tool_calls if tool_call]
 
     def _format_tool_calls_for_ollama(
         self, tool_calls: List[Dict[str, Any]]
@@ -2324,11 +2302,9 @@ class MCPAssistConversationEntity(ConversationEntity):
         conversation_messages = list(messages)
 
         # Buffers for streaming
-        tool_arg_buffers = {}  # index -> partial JSON string
-        tool_names = {}  # index -> tool name
-        tool_ids = {}  # index -> tool_call_id
         response_text = ""
         sentence_buffer = ""
+        announced_tools = set()
         completed_tools = set()
 
         for iteration in range(self.max_iterations):
@@ -2430,7 +2406,6 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             has_tool_calls = False
             current_tool_calls = []
-            stream_tool_index_offset = None
             current_thought_signature = None  # Track Gemini 3 thought signatures
 
             try:
@@ -2556,144 +2531,38 @@ class MCPAssistConversationEntity(ConversationEntity):
                                 if "tool_calls" in delta:
                                     has_tool_calls = True
                                     for tc in delta["tool_calls"]:
-                                        if "index" in tc:
-                                            idx, stream_tool_index_offset = (
-                                                self._normalize_stream_tool_call_index(
-                                                    tc["index"],
-                                                    stream_tool_index_offset,
-                                                )
+                                        idx = merge_streamed_tool_fragment(
+                                            current_tool_calls, tc
+                                        )
+                                        tool_name = (
+                                            current_tool_calls[idx]
+                                            .get("function", {})
+                                            .get("name")
+                                        )
+                                        arguments = (
+                                            current_tool_calls[idx]
+                                            .get("function", {})
+                                            .get("arguments")
+                                        )
+                                        if tool_name and idx not in announced_tools:
+                                            announced_tools.add(idx)
+                                            _LOGGER.info(
+                                                "🔧 Tool streaming: %s", tool_name
                                             )
-                                        elif "id" in tc or "name" in tc.get(
-                                            "function", {}
+                                        if (
+                                            tool_name
+                                            and isinstance(arguments, str)
+                                            and idx not in completed_tools
                                         ):
-                                            # Index-less fragment starting a new call.
-                                            # Ollama streams complete parallel calls
-                                            # with no index; keying them all to slot 0
-                                            # made later calls overwrite earlier ones
-                                            idx = len(current_tool_calls)
-                                        else:
-                                            # Index-less argument-only fragment
-                                            # continues the call currently streaming
-                                            idx = max(0, len(current_tool_calls) - 1)
-
-                                        # Initialize tool call if new; gap-fill so a
-                                        # sparse index can't raise IndexError
-                                        while idx >= len(current_tool_calls):
-                                            current_tool_calls.append({})
-
-                                        if "id" in tc:
-                                            tool_ids[idx] = tc["id"]
-                                            current_tool_calls[idx]["id"] = tc["id"]
-                                            # Add the required type field
-                                            current_tool_calls[idx]["type"] = "function"
-
-                                        if "function" in tc:
-                                            func = tc["function"]
-                                            if "name" in func:
-                                                tool_names[idx] = func["name"]
-                                                if (
-                                                    "function"
-                                                    not in current_tool_calls[idx]
-                                                ):
-                                                    current_tool_calls[idx][
-                                                        "function"
-                                                    ] = {}
-                                                current_tool_calls[idx]["function"][
-                                                    "name"
-                                                ] = func["name"]
-                                                _LOGGER.info(
-                                                    f"🔧 Tool streaming: {func['name']}"
+                                            completed_tools.add(idx)
+                                            if tool_name == "discover_entities":
+                                                await self._trigger_tts(
+                                                    "Looking for devices..."
                                                 )
-
-                                            if "arguments" in func:
-                                                if (
-                                                    "function"
-                                                    not in current_tool_calls[idx]
-                                                ):
-                                                    current_tool_calls[idx][
-                                                        "function"
-                                                    ] = {}
-
-                                                raw_arguments = func["arguments"]
-                                                if isinstance(raw_arguments, dict):
-                                                    current_tool_calls[idx]["function"][
-                                                        "arguments"
-                                                    ] = self._stringify_tool_arguments(
-                                                        raw_arguments
-                                                    )
-
-                                                    tool_name = tool_names.get(idx)
-                                                    if (
-                                                        tool_name
-                                                        and idx not in completed_tools
-                                                    ):
-                                                        completed_tools.add(idx)
-                                                        if (
-                                                            tool_name
-                                                            == "discover_entities"
-                                                        ):
-                                                            await self._trigger_tts(
-                                                                "Looking for devices..."
-                                                            )
-                                                        elif (
-                                                            tool_name
-                                                            == "perform_action"
-                                                        ):
-                                                            await self._trigger_tts(
-                                                                "Controlling the device..."
-                                                            )
-                                                    continue
-
-                                                if idx not in tool_arg_buffers:
-                                                    tool_arg_buffers[idx] = ""
-                                                tool_arg_buffers[idx] += (
-                                                    self._stringify_tool_arguments(
-                                                        raw_arguments
-                                                    )
+                                            elif tool_name == "perform_action":
+                                                await self._trigger_tts(
+                                                    "Controlling the device..."
                                                 )
-
-                                                # Try to parse arguments
-                                                try:
-                                                    json.loads(
-                                                        tool_arg_buffers[idx]
-                                                    )
-                                                    # Valid JSON - save it
-                                                    if (
-                                                        "function"
-                                                        not in current_tool_calls[idx]
-                                                    ):
-                                                        current_tool_calls[idx][
-                                                            "function"
-                                                        ] = {}
-                                                    current_tool_calls[idx]["function"][
-                                                        "arguments"
-                                                    ] = tool_arg_buffers[idx]
-
-                                                    # Quick feedback for tool execution
-                                                    tool_name = tool_names.get(idx)
-                                                    if (
-                                                        tool_name
-                                                        and idx not in completed_tools
-                                                    ):
-                                                        completed_tools.add(idx)
-                                                        if (
-                                                            tool_name
-                                                            == "discover_entities"
-                                                        ):
-                                                            await self._trigger_tts(
-                                                                "Looking for devices..."
-                                                            )
-                                                        elif (
-                                                            tool_name
-                                                            == "perform_action"
-                                                        ):
-                                                            await self._trigger_tts(
-                                                                "Controlling the device..."
-                                                            )
-
-                                                except json.JSONDecodeError:
-                                                    # Still accumulating arguments
-                                                    pass
 
                             except Exception as e:
                                 _LOGGER.debug(f"Stream parsing: {e}")
@@ -2714,12 +2583,18 @@ class MCPAssistConversationEntity(ConversationEntity):
                 await self._trigger_tts(sentence_buffer.strip())
                 sentence_buffer = ""
 
-            current_tool_calls = self._compact_streamed_tool_calls(current_tool_calls)
+            current_tool_calls = finalize_streamed_tool_calls(current_tool_calls)
 
             # If we got tool calls, execute them
             if has_tool_calls and current_tool_calls:
+                streamed_names = [
+                    call.get("function", {}).get("name", "unknown")
+                    for call in current_tool_calls
+                ]
                 _LOGGER.info(
-                    f"⚡ Executing {len(current_tool_calls)} streamed tool calls"
+                    "⚡ Executing %d streamed tool calls: %s",
+                    len(current_tool_calls),
+                    ", ".join(streamed_names),
                 )
                 if self.debug_mode:
                     _LOGGER.debug(
@@ -2789,9 +2664,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                 response_text = (
                     ""  # Clear accumulated text since it was just pre-tool narration
                 )
-                tool_arg_buffers.clear()
-                tool_names.clear()
-                tool_ids.clear()
+                announced_tools.clear()
                 completed_tools.clear()
 
                 # Continue to get next response after tools
