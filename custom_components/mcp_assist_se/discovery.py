@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover - older Home Assistant versions
     lr = None
 
 from .const import MAX_ENTITIES_PER_DISCOVERY
+from .ha_compat import devices_in_area
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1108,18 +1109,14 @@ class SmartDiscovery:
                     if async_should_expose(self.hass, "conversation", entity_entry.entity_id):
                         entity_count += 1
 
-            # Count entities via devices in this area
-            # HA 2026.9+: registry.devices iterates DeviceEntry objects directly;
-            # older HA exposes a dict (device_id -> entry) and needs .values().
-            _raw_devices = device_registry.devices
-            _device_entries = _raw_devices.values() if isinstance(_raw_devices, dict) else _raw_devices
-            for device_entry in _device_entries:
-                if device_entry.area_id == area_entry.id:
-                    for entity_entry in entity_registry.entities.values():
-                        if (entity_entry.device_id == device_entry.id
-                            and not entity_entry.area_id  # Not already counted
-                            and async_should_expose(self.hass, "conversation", entity_entry.entity_id)):
-                            entity_count += 1
+            # Count entities via devices in this area. async_entries_for_area
+            # avoids deprecated mapping access on device_registry.devices.
+            for device_entry in devices_in_area(device_registry, area_entry.id):
+                for entity_entry in entity_registry.entities.values():
+                    if (entity_entry.device_id == device_entry.id
+                        and not entity_entry.area_id  # Not already counted
+                        and async_should_expose(self.hass, "conversation", entity_entry.entity_id)):
+                        entity_count += 1
 
             floor_id = getattr(area_entry, "floor_id", None)
             floor_name = None

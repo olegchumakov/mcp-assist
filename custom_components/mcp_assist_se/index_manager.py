@@ -42,6 +42,8 @@ try:
 except ImportError:  # pragma: no cover - older Home Assistant versions
     lr = None
 
+from .ha_compat import devices_by_label
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -401,14 +403,8 @@ class IndexManager:
             for label_id in getattr(area_entry, "labels", set()) or set():
                 label_areas[label_id].add(area_entry.id)
 
-        label_devices = defaultdict(set)
-        # HA 2026.9+: registry.devices iterates DeviceEntry objects directly;
-        # older HA exposes a dict (device_id -> entry) and needs .values().
-        _raw_devices = device_reg.devices
-        _device_entries = _raw_devices.values() if isinstance(_raw_devices, dict) else _raw_devices
-        for device_entry in _device_entries:
-            for label_id in getattr(device_entry, "labels", set()) or set():
-                label_devices[label_id].add(device_entry.id)
+        # async_entries_for_label avoids deprecated device_registry.devices mapping access.
+        label_devices = devices_by_label(device_reg, label_reg)
 
         label_entities = defaultdict(set)
         for entity_entry in entity_reg.entities.values():

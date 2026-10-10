@@ -68,6 +68,10 @@ MCP Assist supports **21 languages** with localized configuration interfaces, la
   - **Cloud LLMs**: OpenAI, Google Gemini, Anthropic Claude, or OpenRouter (API key required)
 - Python 3.11+
 
+### Home Assistant 2026.10
+
+Version 0.21.5 records conversation tool results with the Home Assistant 2026.10 chat log API (`llm.ToolResult` on `ToolResultContent.result`). Home Assistant 2026.9 and older still receive the previous `tool_result` payload. Device and label lookups use `async_entries_for_area` and `async_entries_for_label`, so 2026.10 no longer logs the deprecated `device_registry.devices` mapping warning.
+
 ## Installation
 
 ### Add to HACS

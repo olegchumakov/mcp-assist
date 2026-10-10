@@ -107,6 +107,7 @@ from .const import (
     MIN_REASONING_COMPLETION_TOKENS,
 )
 from .conversation_history import ConversationHistory
+from .ha_compat import build_tool_result_content
 from .localization import get_goodbye_response
 
 _LOGGER = logging.getLogger(__name__)
@@ -862,11 +863,12 @@ class MCPAssistConversationEntity(ConversationEntity):
             return
 
         try:
-            result_content = chat_log.ToolResultContent(
-                agent_id=self.entity_id,
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                tool_result=tool_result,
+            # HA 2026.10 takes result=llm.ToolResult. Older cores take tool_result=.
+            result_content = build_tool_result_content(
+                self.entity_id,
+                tool_call_id,
+                tool_name,
+                tool_result,
             )
             # Use callback method to add tool result
             self._current_chat_log.async_add_assistant_content_without_tools(
