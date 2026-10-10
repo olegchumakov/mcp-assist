@@ -132,15 +132,49 @@ def huggingface_file_url(repo: str, filename: str) -> str:
 def model_is_downloaded(directory: Path, spec: LocalModelSpec) -> bool:
     """True when every required file is present and, when known, the right size."""
     for name, expected_size in spec.files.items():
-        path = directory / name
-        if not path.is_file():
-            return False
-        actual = path.stat().st_size
-        if actual <= 0:
-            return False
-        if expected_size is not None and actual != expected_size:
+        if not file_is_complete(directory / name, expected_size):
             return False
     return True
+
+
+def file_is_complete(path: Path, expected_size: int | None) -> bool:
+    """True when ``path`` exists, is non-empty, and matches ``expected_size`` when set."""
+    if not path.is_file():
+        return False
+    actual = path.stat().st_size
+    if actual <= 0:
+        return False
+    return expected_size is None or actual == expected_size
+
+
+def prepare_partial_download(path: Path) -> None:
+    """Create the model directory and an empty partial file. Synchronous."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb"):
+        pass
+
+
+def append_download_chunk(path: Path, chunk: bytes) -> None:
+    """Append one downloaded chunk. Synchronous."""
+    with path.open("ab") as handle:
+        handle.write(chunk)
+
+
+def finalize_partial_download(
+    partial: Path, destination: Path, expected_size: int | None
+) -> None:
+    """Check the partial size and rename it into place. Synchronous."""
+    actual = partial.stat().st_size
+    if expected_size is not None and actual != expected_size:
+        raise RuntimeError(
+            f"{destination.name} is {actual} bytes, expected {expected_size}"
+        )
+    partial.replace(destination)
+
+
+def discard_partial_download(path: Path) -> None:
+    """Remove a partial download if it is still there. Synchronous."""
+    path.unlink(missing_ok=True)
 
 
 def _limit_blas_threads() -> None:

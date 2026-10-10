@@ -15,11 +15,16 @@ from .const import EMBEDDING_PROVIDER_LOCAL, EMBEDDING_PROVIDER_OPENAI
 from .embedding_api import embeddings_url, parse_openai_embeddings
 from .local_embedder import (
     BertTextEmbedder,
+    append_download_chunk,
     apply_prefix,
+    discard_partial_download,
+    file_is_complete,
+    finalize_partial_download,
     huggingface_file_url,
     load_embedder,
     local_model_spec,
     model_is_downloaded,
+    prepare_partial_download,
 )
 from .memory_manager import MemoryManager
 from .memory_rank import (
@@ -306,7 +311,10 @@ class EmbeddingService:
             spec = local_model_spec(model_id)
             directory = self._model_dir(spec.model_id)
             try:
-                if not model_is_downloaded(directory, spec):
+                downloaded = await self.hass.async_add_executor_job(
+                    model_is_downloaded, directory, spec
+                )
+                if not downloaded:
                     _LOGGER.info(
                         "Downloading local embedding model %s (~%d MB) into %s",
                         spec.model_id,
@@ -342,16 +350,16 @@ class EmbeddingService:
                 )
 
     async def _download(self, spec, directory: Path) -> None:
-        directory.mkdir(parents=True, exist_ok=True)
         timeout = aiohttp.ClientTimeout(total=_DOWNLOAD_TIMEOUT_SECONDS)
         headers = {"User-Agent": _USER_AGENT}
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             for filename, expected_size in spec.files.items():
                 destination = directory / filename
-                if destination.is_file():
-                    actual = destination.stat().st_size
-                    if actual > 0 and (expected_size is None or actual == expected_size):
-                        continue
+                complete = await self.hass.async_add_executor_job(
+                    file_is_complete, destination, expected_size
+                )
+                if complete:
+                    continue
                 await self._download_file(
                     session,
                     huggingface_file_url(spec.repo, filename),
@@ -366,21 +374,28 @@ class EmbeddingService:
         destination: Path,
         expected_size: int | None,
     ) -> None:
+        """Stream one model file. Every filesystem call runs in the executor."""
         partial = destination.with_suffix(destination.suffix + ".partial")
         try:
+            await self.hass.async_add_executor_job(prepare_partial_download, partial)
             async with session.get(url) as response:
                 response.raise_for_status()
-                with partial.open("wb") as handle:
-                    async for chunk in response.content.iter_chunked(1 << 20):
-                        handle.write(chunk)
-            actual = partial.stat().st_size
-            if expected_size is not None and actual != expected_size:
-                raise RuntimeError(
-                    f"{destination.name} is {actual} bytes, expected {expected_size}"
-                )
-            partial.replace(destination)
+                async for chunk in response.content.iter_chunked(1 << 20):
+                    if not chunk:
+                        continue
+                    await self.hass.async_add_executor_job(
+                        append_download_chunk, partial, chunk
+                    )
+            await self.hass.async_add_executor_job(
+                finalize_partial_download, partial, destination, expected_size
+            )
         except Exception:
-            partial.unlink(missing_ok=True)
+            try:
+                await self.hass.async_add_executor_job(discard_partial_download, partial)
+            except Exception:
+                _LOGGER.warning(
+                    "Could not remove partial download %s", partial, exc_info=True
+                )
             raise
 
     def _model_dir(self, model_id: str) -> Path:

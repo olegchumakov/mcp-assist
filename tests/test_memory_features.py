@@ -21,7 +21,16 @@ if "mcp_assist_se" not in sys.modules:
     sys.modules["mcp_assist_se"] = package
 
 from mcp_assist_se.embedding_api import embeddings_url, parse_openai_embeddings
-from mcp_assist_se.local_embedder import apply_prefix, canonical_local_model, local_model_spec
+from mcp_assist_se.local_embedder import (
+    append_download_chunk,
+    apply_prefix,
+    canonical_local_model,
+    discard_partial_download,
+    file_is_complete,
+    finalize_partial_download,
+    local_model_spec,
+    prepare_partial_download,
+)
 from mcp_assist_se.memory_rank import (
     MAX_PERSONALITY_INSTRUCTION_CHARS,
     build_search_text,
@@ -297,6 +306,38 @@ class TinyBertForwardTests(unittest.TestCase):
         got = model._gelu(sample)
         expected = 0.5 * sample * (1.0 + np.vectorize(math.erf)(sample / math.sqrt(2.0)))
         self.assertTrue(np.allclose(got, expected, atol=1e-6))
+
+
+class PartialDownloadTests(unittest.TestCase):
+    def test_chunks_are_written_off_to_the_side_then_renamed(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "model.safetensors"
+            partial = destination.with_suffix(destination.suffix + ".partial")
+            prepare_partial_download(partial)
+            append_download_chunk(partial, b"abc")
+            append_download_chunk(partial, b"de")
+            finalize_partial_download(partial, destination, 5)
+            self.assertTrue(file_is_complete(destination, 5))
+            self.assertFalse(partial.exists())
+            self.assertEqual(destination.read_bytes(), b"abcde")
+
+    def test_wrong_size_removes_the_partial(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            destination = root / "model.safetensors"
+            partial = destination.with_suffix(destination.suffix + ".partial")
+            prepare_partial_download(partial)
+            append_download_chunk(partial, b"short")
+            with self.assertRaises(RuntimeError):
+                finalize_partial_download(partial, destination, 100)
+            discard_partial_download(partial)
+            self.assertFalse(destination.exists())
+            self.assertFalse(partial.exists())
 
 
 if __name__ == "__main__":
