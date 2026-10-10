@@ -14,11 +14,29 @@ from aiohttp import web, WSMsgType
 from aiohttp.web_ws import WebSocketResponse
 
 from homeassistant.core import HomeAssistant, SupportsResponse
-from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.util import dt as dt_util
 
+from .action_verify import (
+    CONFIRM_WAIT_SECONDS,
+    POLL_SECONDS,
+    SETTLED_WAIT_SECONDS,
+    expects_change,
+    facts_from_context,
+    guard_empty_activation,
+    is_dead_snapshot,
+    judge_entity,
+    observation_changed,
+    public_snapshot,
+    render_verification,
+    snapshot_from_mapping,
+)
 from .const import (
     MCP_SERVER_NAME,
     MCP_PROTOCOL_VERSION,
@@ -36,6 +54,7 @@ from .const import (
     DEFAULT_API_KEY,
     DEFAULT_ENABLE_MEMORY_TOOLS,
     DEFAULT_ENABLE_PERSONALITY,
+    PERFORM_ACTION_DATA_DESCRIPTION,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
@@ -1918,7 +1937,7 @@ class MCPServer:
                         },
                         "data": {
                             "type": "object",
-                            "description": "Additional parameters for the service (e.g., brightness: 50, temperature: 22)",
+                            "description": PERFORM_ACTION_DATA_DESCRIPTION,
                             "additionalProperties": True,
                         },
                     },
@@ -2166,7 +2185,7 @@ class MCPServer:
         elif tool_name == "get_index":
             return await self.tool_get_index()
         elif tool_name == "perform_action":
-            return await self.tool_perform_action(arguments)
+            return await self.tool_perform_action(arguments, context)
         elif tool_name == "set_conversation_state":
             return await self.tool_set_conversation_state(arguments)
         elif tool_name == "run_script":
@@ -2469,12 +2488,16 @@ class MCPServer:
         # Format as JSON for structured consumption
         return {"content": [{"type": "text", "text": json.dumps(index, indent=2)}]}
 
-    async def tool_perform_action(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Perform an action on Home Assistant entities with progress notifications."""
+    async def tool_perform_action(
+        self, args: Dict[str, Any], context: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
+        """Perform an action and report whether entity state actually changed."""
         domain = args.get("domain")
         action = args.get("action")
         target = args.get("target", {})
         data = args.get("data", {})
+        if not isinstance(data, dict):
+            data = {}
 
         # Validate required parameters
         if not domain:
@@ -2566,64 +2589,262 @@ class MCPServer:
                 }
 
         try:
-            # Prepare service data
-            service_data = {**resolved_target, **data}
-
-            # Some services (e.g. weather.get_forecasts) only work with
-            # return_response=True; calling them without it makes HA raise
-            supports = self.hass.services.supports_response(domain, service)
-            wants_response = supports is not SupportsResponse.NONE
-
-            # Call the Home Assistant service with the validated service name
-            response = await self.hass.services.async_call(
+            return await self._execute_verified_action(
                 domain=domain,
-                service=service,  # Use the mapped service name
-                service_data=service_data,
-                blocking=True,  # Wait for completion
-                return_response=wants_response,
+                action=action,
+                service=service,
+                data=data,
+                resolved_target=resolved_target,
+                context=context,
             )
-
-            # Wait briefly for state to update
-            await asyncio.sleep(0.5)
-
-            # Notify completion
-            self.publish_progress(
-                "tool_complete",
-                f"Action completed: {domain}.{service}",
-                tool="perform_action",
-                success=True,
-            )
-
-            # Check new states if we have entity_ids
-            result_text = f"✅ Successfully executed {domain}.{service}"
-            if service != action:
-                result_text += f" (mapped from '{action}')"
-
-            if wants_response and response:
-                response = _strip_non_json_serializable(response)
-                result_text += "\n\nResponse:\n" + json.dumps(response, indent=2)
-
-            if "entity_id" in resolved_target:
-                entity_ids = resolved_target["entity_id"]
-                if isinstance(entity_ids, str):
-                    entity_ids = [entity_ids]
-
-                # Get new states
-                states_info = []
-                for entity_id in entity_ids[:10]:  # Limit to first 10 for response size
-                    state = self.hass.states.get(entity_id)
-                    if state:
-                        states_info.append(f"  • {entity_id}: {state.state}")
-
-                if states_info:
-                    result_text += "\n\nNew states:\n" + "\n".join(states_info)
-
-            return {"content": [{"type": "text", "text": result_text}]}
-
         except Exception as err:
             error_msg = f"Service call failed: {err}"
             _LOGGER.exception(error_msg)
             return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+    def _target_entity_ids(self, resolved_target: Dict[str, Any]) -> List[str]:
+        """Entity ids named by the target, including entities of a device id."""
+        found: List[str] = []
+        raw_ids = resolved_target.get("entity_id")
+        if isinstance(raw_ids, str):
+            found.append(raw_ids)
+        elif isinstance(raw_ids, list):
+            found.extend(str(entity_id) for entity_id in raw_ids if entity_id)
+
+        device_ids = resolved_target.get("device_id")
+        if isinstance(device_ids, str):
+            device_ids = [device_ids]
+        if isinstance(device_ids, list):
+            try:
+                registry = er.async_get(self.hass)
+                wanted = {str(device_id) for device_id in device_ids if device_id}
+                for entry in registry.entities.values():
+                    if getattr(entry, "device_id", None) in wanted:
+                        found.append(entry.entity_id)
+            except Exception:
+                _LOGGER.debug("Could not expand device_id to entities", exc_info=True)
+
+        unique: List[str] = []
+        for entity_id in found:
+            if entity_id not in unique:
+                unique.append(entity_id)
+        return unique
+
+    def _snapshot_entity(self, entity_id: str) -> Dict[str, Any]:
+        """Read one entity, including name and area when the registry has them."""
+        state_obj = self.hass.states.get(entity_id)
+        if state_obj is None:
+            return snapshot_from_mapping(
+                {"entity_id": entity_id, "missing": True, "state": "unknown"}
+            )
+        area = ""
+        aliases: List[str] = []
+        try:
+            entry = er.async_get(self.hass).async_get(entity_id)
+            if entry is not None:
+                aliases = [
+                    str(alias)
+                    for alias in (getattr(entry, "aliases", None) or [])
+                    if alias
+                ]
+                area_id = getattr(entry, "area_id", None)
+                if not area_id and getattr(entry, "device_id", None):
+                    device = dr.async_get(self.hass).async_get(entry.device_id)
+                    area_id = getattr(device, "area_id", None) if device else None
+                if area_id:
+                    area_entry = ar.async_get(self.hass).async_get_area(area_id)
+                    area = area_entry.name if area_entry else ""
+        except Exception:
+            _LOGGER.debug(
+                "Could not read registry context for %s", entity_id, exc_info=True
+            )
+        attributes = dict(getattr(state_obj, "attributes", None) or {})
+        return snapshot_from_mapping(
+            {
+                "entity_id": entity_id,
+                "state": state_obj.state,
+                "name": getattr(state_obj, "name", None)
+                or attributes.get("friendly_name")
+                or entity_id,
+                "friendly_name": attributes.get("friendly_name"),
+                "area": area,
+                "aliases": aliases,
+                "attributes": attributes,
+                "last_updated": getattr(state_obj, "last_updated", None),
+                "last_reported": getattr(state_obj, "last_reported", None),
+                "missing": False,
+            }
+        )
+
+    async def _wait_for_state_reports(
+        self,
+        entity_ids: List[str],
+        before: Dict[str, Dict[str, Any]],
+        timeout: float,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Poll until a snapshot changes or the wait expires."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        latest = {entity_id: before[entity_id] for entity_id in entity_ids}
+        while True:
+            latest = {
+                entity_id: self._snapshot_entity(entity_id) for entity_id in entity_ids
+            }
+            if any(
+                observation_changed(before[entity_id], latest[entity_id])
+                for entity_id in entity_ids
+            ):
+                return latest
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return latest
+            await asyncio.sleep(min(POLL_SECONDS, remaining))
+
+    async def _execute_verified_action(
+        self,
+        *,
+        domain: str,
+        action: str,
+        service: str,
+        data: Dict[str, Any],
+        resolved_target: Dict[str, Any],
+        context: Dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        """Call the service only when we can still confirm the outcome."""
+        entity_ids = self._target_entity_ids(resolved_target)[:10]
+        before = {
+            entity_id: self._snapshot_entity(entity_id) for entity_id in entity_ids
+        }
+        live_ids = [
+            entity_id
+            for entity_id, snapshot in before.items()
+            if not is_dead_snapshot(snapshot)
+        ]
+        if entity_ids and not live_ids:
+            rows = [
+                {"status": "not_done", "before": snapshot, "after": snapshot}
+                for snapshot in before.values()
+            ]
+            self._publish_action_finished(domain, service, success=False)
+            return self._verification_result(rows)
+
+        guard = guard_empty_activation(
+            service,
+            data,
+            [before[entity_id] for entity_id in live_ids],
+            facts_from_context(context),
+        )
+        if guard:
+            self._publish_action_finished(domain, service, success=False)
+            return {
+                "content": [{"type": "text", "text": guard}],
+                "isError": True,
+                "action_result": {"status": "not_done", "entities": []},
+            }
+
+        call_target = dict(resolved_target)
+        if "entity_id" in call_target and live_ids:
+            call_target["entity_id"] = live_ids
+        service_data = {**call_target, **data}
+
+        supports = self.hass.services.supports_response(domain, service)
+        wants_response = supports is not SupportsResponse.NONE
+        response = await self.hass.services.async_call(
+            domain=domain,
+            service=service,
+            service_data=service_data,
+            blocking=True,
+            return_response=wants_response,
+        )
+
+        if not entity_ids:
+            self._publish_action_finished(
+                domain, service, success=bool(wants_response and response)
+            )
+            if wants_response and response:
+                response = _strip_non_json_serializable(response)
+                text = (
+                    "SERVICE RESPONSE. This is data from the service, "
+                    "not a confirmed device change.\n"
+                    + json.dumps(response, indent=2)
+                )
+                return {"content": [{"type": "text", "text": text}]}
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "NOT CONFIRMED\n"
+                            "No entity state was available to confirm this call. "
+                            "Do not say the action was done."
+                        ),
+                    }
+                ],
+                "isError": True,
+                "action_result": {"status": "not_confirmed", "entities": []},
+            }
+
+        timeout = (
+            CONFIRM_WAIT_SECONDS
+            if any(
+                expects_change(service, data, before[entity_id])
+                for entity_id in live_ids
+            )
+            else SETTLED_WAIT_SECONDS
+        )
+        after = await self._wait_for_state_reports(live_ids, before, timeout)
+        rows = []
+        for entity_id, snapshot in before.items():
+            if is_dead_snapshot(snapshot):
+                rows.append(
+                    {"status": "not_done", "before": snapshot, "after": snapshot}
+                )
+                continue
+            later = after.get(entity_id, snapshot)
+            rows.append(
+                {
+                    "status": judge_entity(service, data, snapshot, later),
+                    "before": snapshot,
+                    "after": later,
+                }
+            )
+        result = self._verification_result(rows)
+        if wants_response and response:
+            response = _strip_non_json_serializable(response)
+            result["content"][0]["text"] += "\n\nResponse:\n" + json.dumps(
+                response, indent=2
+            )
+        self._publish_action_finished(domain, service, success=not result.get("isError"))
+        return result
+
+    def _publish_action_finished(self, domain: str, service: str, *, success: bool) -> None:
+        self.publish_progress(
+            "tool_complete",
+            f"Action completed: {domain}.{service}",
+            tool="perform_action",
+            success=success,
+        )
+
+    def _verification_result(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        text, is_error, status = render_verification(rows)
+        result: Dict[str, Any] = {
+            "content": [{"type": "text", "text": text}],
+            "action_result": {
+                "status": status,
+                "entities": [
+                    {
+                        "entity_id": (row.get("before") or {}).get("entity_id"),
+                        "status": row.get("status"),
+                        "before": public_snapshot(row.get("before") or {}),
+                        "after": public_snapshot(row.get("after") or {}),
+                    }
+                    for row in rows
+                ],
+            },
+        }
+        if is_error:
+            result["isError"] = True
+        return result
 
     async def tool_set_conversation_state(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Set whether the assistant expects a user response."""

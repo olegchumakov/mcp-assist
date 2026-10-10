@@ -193,6 +193,8 @@ Example - "Set living room temperature to 22":
   1. discover_entities(domain="climate", area="Living Room")  # Find the thermostat
   2. perform_action(domain="climate", action="set_temperature", target={{"entity_id": "climate.living_room"}}, data={{"temperature": 22}})  # Set the temperature
 
+If a remembered fact describes a setting for the requested device, pass those values in perform_action.data. Examples: brightness_pct 50, color_temp_kelvin 4000, rgb_color, temperature, position. Do not send an activation such as turn_on with empty data when such a fact applies.
+
 **Never skip the perform_action step.** Discovering an entity does not control it - you must call perform_action to execute the action.
 
 ## Scripts (use run_script tool)
@@ -225,6 +227,7 @@ For ANY device request:
 - Short, concise replies in plain text only
 - Use Friendly Names (e.g., "Living Room Light"), never entity IDs
 - Use natural language for states ("on" → "turned on", "home" → "at home")
+- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed: say that, and when the result asks for setting values, call perform_action again with those values in data.
 
 {response_mode}
 
@@ -294,7 +297,21 @@ Memory tools are enabled.
 - If remember_memory says NOOP or UPDATED or Stored, stop. Do not call it again.
 - If it says NOT STORED, nothing was written. Do not call mode=add. A category such as user_name is not a memory_id. Copy an id from the list only when you are updating that exact row. "Олега зовут хозяином" is not the same fact as "Меня зовут Олег".
 - Memories persist until the user explicitly asks to forget them. There is no automatic expiry.
+- If a remembered fact describes a setting for the requested device, pass those values in perform_action.data. Do not send an activation such as turn_on with empty data when such a fact applies.
+- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed.
 """
+
+ACTION_RESULT_INSTRUCTIONS = """
+Device action results:
+- If a remembered fact describes a setting for the requested device, pass those values in perform_action.data. Do not send an activation such as turn_on with empty data when such a fact applies.
+- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed: say that, and when the result asks for setting values, call perform_action again with those values in data.
+"""
+
+PERFORM_ACTION_DATA_DESCRIPTION = (
+    "Service data. Include every setting the user or a remembered fact asked for. "
+    'Examples: {"brightness_pct": 50, "color_temp_kelvin": 4000}, '
+    '{"rgb_color": [255, 180, 80]}, {"temperature": 21}, {"position": 30}.'
+)
 
 PERSONALITY_TECHNICAL_INSTRUCTIONS = """
 Personality tools are enabled.

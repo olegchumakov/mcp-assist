@@ -107,6 +107,7 @@ from .const import (
     DEFAULT_ENABLE_MEMORY_TOOLS,
     DEFAULT_ENABLE_PERSONALITY,
     DEFAULT_MEMORY_AUTO_RETRIEVE,
+    ACTION_RESULT_INSTRUCTIONS,
     MEMORY_TECHNICAL_INSTRUCTIONS,
     PERSONALITY_TECHNICAL_INSTRUCTIONS,
     MIN_REASONING_COMPLETION_TOKENS,
@@ -121,6 +122,21 @@ _LOGGER = logging.getLogger(__name__)
 MCP_TOOL_CACHE_TTL_SECONDS = 30.0
 MAX_TOOL_RESULT_CHARS = 8000
 MAX_TOOL_RESULT_LINES = 120
+
+
+def _injected_fact_texts(items: list) -> list[str]:
+    """Texts of the facts injected into this turn, for the action safety net."""
+    texts: list[str] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        texts.append(text[:500])
+        if len(texts) >= 8:
+            break
+    return texts
 
 
 class HermesSessionError(Exception):
@@ -911,6 +927,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         self, user_input: ConversationInput, conversation_id: str
     ) -> ConversationResult:
         """Process user input with ChatLog tracking."""
+        self._turn_memory_facts = []
         try:
             _LOGGER.debug("Conversation ID: %s", conversation_id)
 
@@ -1489,6 +1506,8 @@ class MCPAssistConversationEntity(ConversationEntity):
                 "{response_mode}", mode_instructions
             )
 
+            technical_prompt += "\n\n" + ACTION_RESULT_INSTRUCTIONS.strip()
+
             # Inject persistent memory and personality tool instructions
             if self.memory_tools_enabled:
                 technical_prompt += "\n\n" + MEMORY_TECHNICAL_INSTRUCTIONS.strip()
@@ -1574,9 +1593,11 @@ class MCPAssistConversationEntity(ConversationEntity):
                     len(result.items),
                     result.reason,
                 )
+            self._turn_memory_facts = _injected_fact_texts(result.items)
             return format_remembered_facts(result.items)
         except Exception as err:
             _LOGGER.warning("Automatic memory retrieval failed: %s", err)
+            self._turn_memory_facts = []
             return ""
 
     async def _get_home_context(self) -> str:
@@ -1743,7 +1764,10 @@ class MCPAssistConversationEntity(ConversationEntity):
                     "arguments": arguments,
                     "context": {
                         "conversation_id": getattr(self, "_current_conversation_id", "")
-                        or ""
+                        or "",
+                        "injected_facts": list(
+                            getattr(self, "_turn_memory_facts", []) or []
+                        ),
                     },
                 },
                 "id": request_id,
@@ -1751,7 +1775,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             _LOGGER.debug(f"MCP request: {json.dumps(payload, indent=2)}")
 
-            timeout = aiohttp.ClientTimeout(total=10)
+            timeout = aiohttp.ClientTimeout(total=15)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(f"{mcp_url}/", json=payload) as response:
                     if response.status != 200:

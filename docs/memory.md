@@ -1,6 +1,6 @@
 # Memory and personality
 
-MCP Assist SE 0.22.3 keeps two different kinds of long-term context.
+MCP Assist SE 0.22.4 keeps two different kinds of long-term context.
 
 ## Facts
 
@@ -35,6 +35,12 @@ Limits, so the prompt stays small: 8 instructions, 240 characters each, 1200 cha
 If the model tries to store a style request with `remember_memory`, the tool refuses and tells it to call `set_personality_instruction` instead. The new style is in the prompt on the next turn. The tool result also tells the model to follow it in the current reply.
 
 The block does not replace device-control rules. The assistant still has to discover entities and call `perform_action`.
+
+If a remembered fact describes a setting for the device the user just asked for, the model is told to put those values in `perform_action` data. An activation with empty data is refused when one of the facts injected on that turn names the target and contains a number. The check uses the fact text and the entity's name, alias, or area. It does not depend on a fixed list of device words or setting values.
+
+`perform_action` then compares state before and after the call. `CHANGED` and `ALREADY` are the only results that mean the request is done. `NO CHANGE` means the device was already in that state and no setting values were sent. `NOT DONE` means the target is unavailable or the call was refused. `NOT CONFIRMED` means a change was expected and no state report showed it. The model is told to say that plainly.
+
+Discovery and the entity index leave out unavailable entities that have no friendly name, alias, or area. A name that is only the entity id or an IEEE address does not count. Other unavailable entities are listed and marked unavailable.
 
 ## Local embeddings
 
