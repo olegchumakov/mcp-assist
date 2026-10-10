@@ -1,10 +1,16 @@
 # Memory and personality
 
-MCP Assist SE 0.22.0 keeps two different kinds of long-term context.
+MCP Assist SE 0.22.1 keeps two different kinds of long-term context.
 
 ## Facts
 
 `remember_memory`, `recall_memories`, and `forget_memory` store facts and preferences until you ask to forget them. There is no expiry.
+
+`remember_memory` updates an existing memory when the new fact is about the same subject (cosine at or above the duplicate threshold, 0.80 by default, and the same category when you set one). The id stays. The new wording, timestamp, and embedding replace the old ones. Saying the same thing a second way does not create a second row.
+
+`forget_memory` matches Russian inflections by stem, so «пиратов» and «пиратах» find «пират». It also deletes every sufficiently similar item when you say to forget everything about a subject, or when `forget_all_matches` is true. The forget threshold defaults to 0.80. A result of `DELETED NOTHING` means nothing was removed. A query also searches the personality block, and `remove_personality_instruction` searches memories when the instruction id is unknown.
+
+`merge_duplicate_memories` folds existing near-duplicates into the newest text of each group. The same merge runs once after the local model loads on upgrade. Each removed line is written to the log at warning. Rows with different categories are left alone.
 
 Before each reply, when automatic retrieval is on, the integration embeds your current utterance (and, by default, the previous user turn) and injects the closest memories above the similarity threshold. They show up in the system prompt as **Remembered facts**. The model does not have to decide to call `recall_memories` for that. `recall_memories` remains the tool for "what do you remember?".
 
@@ -18,7 +24,8 @@ Speaking style is not a memory. A request such as "talk to me like a pirate" or 
 | --- | --- |
 | `view_personality` | List the instructions and their ids |
 | `set_personality_instruction` | Add one instruction, or replace it when `instruction_id` is set |
-| `remove_personality_instruction` | Delete one by id or by a snippet of its text |
+| `remove_personality_instruction` | Delete by id or by subject, including Russian inflections. Also searches memories when the id is unknown |
+| `merge_duplicate_memories` | Merge near-duplicates into the newest entry. Nothing is removed below the duplicate threshold |
 | `reset_personality` | Clear the block. Requires `confirm: true` |
 
 Limits, so the prompt stays small: 8 instructions, 240 characters each, 1200 characters in total.

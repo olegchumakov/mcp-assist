@@ -198,6 +198,25 @@ class PersonalityManager:
             "removed": removed,
         }
 
+    async def async_delete_ids(self, instruction_ids: set[str]) -> list[dict[str, Any]]:
+        """Delete personality instructions by id. Unknown ids are ignored."""
+        targets = {item_id for item_id in instruction_ids if item_id}
+        if not targets:
+            return []
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            removed: list[dict[str, Any]] = []
+            kept: list[dict[str, Any]] = []
+            for item in self._instructions:
+                if item["id"] in targets:
+                    removed.append(dict(item))
+                else:
+                    kept.append(item)
+            self._instructions = kept
+            if removed:
+                await self._save_locked()
+        return removed
+
     async def async_reset(self) -> dict[str, Any]:
         """Clear every personality instruction."""
         async with self._lock:

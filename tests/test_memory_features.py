@@ -34,15 +34,20 @@ from mcp_assist_se.local_embedder import (
 from mcp_assist_se.memory_rank import (
     MAX_PERSONALITY_INSTRUCTION_CHARS,
     build_search_text,
+    format_forget_result,
     format_personality_block,
     format_remembered_facts,
     keyword_auto_matches,
     keyword_score,
     looks_like_personality_request,
     memories_missing_embedding,
+    plan_duplicate_merges,
     public_memory,
     rank_by_cosine,
     rank_memories,
+    select_duplicate,
+    select_forget_matches,
+    stem_token,
     validate_personality_text,
 )
 from mcp_assist_se.memory_settings import normalize_memory_options
@@ -217,6 +222,8 @@ class EmbeddingHelperTests(unittest.TestCase):
         self.assertEqual(normalized["local_embedding_model"], "sergeyzh/rubert-tiny-turbo")
         self.assertEqual(normalized["embedding_provider"], "local")
         self.assertEqual(normalized["memory_top_k"], 4)
+        self.assertEqual(normalized["memory_dedupe_threshold"], 0.80)
+        self.assertEqual(normalized["memory_forget_threshold"], 0.80)
         clamped = normalize_memory_options(
             {
                 "memory_top_k": 99,
@@ -306,6 +313,170 @@ class TinyBertForwardTests(unittest.TestCase):
         got = model._gelu(sample)
         expected = 0.5 * sample * (1.0 + np.vectorize(math.erf)(sample / math.sqrt(2.0)))
         self.assertTrue(np.allclose(got, expected, atol=1e-6))
+
+
+class ForgetAndDedupeTests(unittest.TestCase):
+    def test_russian_inflection_matches_the_stored_stem(self) -> None:
+        self.assertEqual(stem_token("пиратов"), "пират")
+        self.assertEqual(stem_token("пиратах"), "пират")
+        self.assertEqual(stem_token("пират"), "пират")
+        pirate = {
+            "id": "pirate",
+            "text": "Ты должна разговаривать как пират.",
+            "category": None,
+            "created_at": "2024-01-01T00:00:00+00:00",
+        }
+        door = {
+            "id": "door",
+            "text": "Дверь спальни закрыта.",
+            "category": None,
+            "created_at": "2024-01-02T00:00:00+00:00",
+        }
+        # The old ranker requires the query token to be a substring, so the
+        # genitive "пиратов" never hits the nominative "пират".
+        self.assertEqual(rank_memories([pirate], query="пиратов", category=None), [])
+        for query in ("пиратов", "пиратах", "забудь всё про пиратов"):
+            matched = select_forget_matches(
+                [pirate, door],
+                query,
+                similarities=None,
+                threshold=0.80,
+            )
+            self.assertEqual([item["id"] for item in matched], ["pirate"], query)
+
+    def test_forget_everything_deletes_every_similar_item(self) -> None:
+        memories = [
+            {
+                "id": "style",
+                "text": "Ты должна разговаривать как пират.",
+                "category": None,
+                "created_at": "2024-01-01T00:00:00+00:00",
+            },
+            {
+                "id": "flag",
+                "text": "Пиратский флаг висит в кабинете.",
+                "category": None,
+                "created_at": "2024-01-02T00:00:00+00:00",
+            },
+            {
+                "id": "door",
+                "text": "Дверь спальни закрыта.",
+                "category": None,
+                "created_at": "2024-01-03T00:00:00+00:00",
+            },
+        ]
+        matched = select_forget_matches(
+            memories,
+            "забудь всё про пиратов",
+            similarities={"style": 0.81, "flag": 0.84, "door": 0.67},
+            threshold=0.80,
+        )
+        self.assertEqual({item["id"] for item in matched}, {"style", "flag"})
+        one = select_forget_matches(
+            memories,
+            "пиратов",
+            delete_all=False,
+            similarities={"style": 0.81, "flag": 0.90, "door": 0.67},
+            threshold=0.80,
+        )
+        self.assertEqual([item["id"] for item in one], ["flag"])
+        self.assertIn("DELETED NOTHING", format_forget_result([], [], searched_personality=True, searched_memories=True))
+
+    def test_remember_replaces_the_same_subject(self) -> None:
+        items = [
+            {
+                "id": "name",
+                "text": "Меня зовут Олег",
+                "category": None,
+                "created_at": "2024-01-01T00:00:00+00:00",
+            },
+            {
+                "id": "light",
+                "text": "Яркий белый свет: 100%, 2000К",
+                "category": "light",
+                "created_at": "2024-01-02T00:00:00+00:00",
+            },
+        ]
+        name = select_duplicate(
+            items,
+            "Пользователя зовут Олег.",
+            None,
+            {"name": 0.92, "light": 0.60},
+            0.80,
+        )
+        self.assertIsNotNone(name)
+        assert name is not None
+        self.assertEqual(name["id"], "name")
+        light = select_duplicate(
+            items,
+            "Яркий белый свет для ленты в гостиной: яркость 255, 2000K",
+            "light",
+            {"name": 0.58, "light": 0.82},
+            0.80,
+        )
+        self.assertIsNotNone(light)
+        assert light is not None
+        self.assertEqual(light["id"], "light")
+        other_category = select_duplicate(
+            items,
+            "Яркий белый свет: 50%",
+            "kitchen",
+            {"light": 0.90},
+            0.80,
+        )
+        self.assertIsNone(other_category)
+        below = select_duplicate(
+            items,
+            "Пользователя зовут Олег.",
+            None,
+            {"name": 0.50},
+            0.80,
+        )
+        self.assertIsNone(below)
+        stemmed = select_duplicate(
+            items,
+            "Пользователя зовут Олег.",
+            None,
+            None,
+            0.80,
+        )
+        self.assertIsNotNone(stemmed)
+        assert stemmed is not None
+        self.assertEqual(stemmed["id"], "name")
+
+    def test_merge_keeps_the_newest_text(self) -> None:
+        items = [
+            {
+                "id": "old-name",
+                "text": "Меня зовут Олег",
+                "category": None,
+                "created_at": "2024-01-01T00:00:00+00:00",
+            },
+            {
+                "id": "new-name",
+                "text": "Пользователя зовут Олег.",
+                "category": None,
+                "created_at": "2024-06-01T00:00:00+00:00",
+            },
+            {
+                "id": "door",
+                "text": "Дверь спальни закрыта.",
+                "category": None,
+                "created_at": "2024-07-01T00:00:00+00:00",
+            },
+        ]
+        groups = plan_duplicate_merges(
+            items,
+            {
+                "old-name": {"new-name": 0.92, "door": 0.65},
+                "new-name": {"old-name": 0.92, "door": 0.64},
+                "door": {"old-name": 0.65, "new-name": 0.64},
+            },
+            0.80,
+        )
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["keep"]["id"], "new-name")
+        self.assertEqual([item["id"] for item in groups[0]["remove"]], ["old-name"])
 
 
 class PartialDownloadTests(unittest.TestCase):

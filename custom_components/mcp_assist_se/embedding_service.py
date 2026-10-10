@@ -29,8 +29,11 @@ from .local_embedder import (
 from .memory_manager import MemoryManager
 from .memory_rank import (
     build_search_text,
+    cosine_similarity,
+    format_merge_result,
     keyword_auto_matches,
     memories_missing_embedding,
+    plan_duplicate_merges,
     rank_by_cosine,
     round_vector,
 )
@@ -348,6 +351,179 @@ class EmbeddingService:
                     spec.model_id,
                     err,
                 )
+            else:
+                await self._maybe_merge_duplicates()
+
+    async def async_similarities(
+        self,
+        query: str,
+        items: list[dict[str, Any]],
+    ) -> dict[str, float] | None:
+        """Cosine of ``query`` against each item, or None if embeddings are unavailable."""
+        cleaned = [
+            item
+            for item in items
+            if item.get("id") and str(item.get("text") or "").strip()
+        ]
+        if not cleaned or not str(query or "").strip():
+            return {}
+        settings = read_memory_settings(self.hass)
+        vectors = await self._embed_texts(
+            settings,
+            [str(query), *(str(item["text"]) for item in cleaned)],
+            query_count=1,
+        )
+        if not vectors or len(vectors) != len(cleaned) + 1:
+            return None
+        return {
+            str(item["id"]): cosine_similarity(vectors[0], vectors[index + 1])
+            for index, item in enumerate(cleaned)
+        }
+
+    async def async_similarity_matrix(
+        self,
+        items: list[dict[str, Any]],
+    ) -> dict[str, dict[str, float]] | None:
+        """Pairwise cosine for duplicate grouping, or None if embeddings are unavailable."""
+        cleaned = [
+            item
+            for item in items
+            if item.get("id") and str(item.get("text") or "").strip()
+        ]
+        if len(cleaned) < 2:
+            return {}
+        settings = read_memory_settings(self.hass)
+        vectors = await self._embed_texts(
+            settings,
+            [str(item["text"]) for item in cleaned],
+            query_count=0,
+        )
+        if not vectors or len(vectors) != len(cleaned):
+            return None
+        matrix: dict[str, dict[str, float]] = {}
+        for left_index, left in enumerate(cleaned):
+            row: dict[str, float] = {}
+            for right_index, right in enumerate(cleaned):
+                if left_index == right_index:
+                    continue
+                row[str(right["id"])] = cosine_similarity(
+                    vectors[left_index], vectors[right_index]
+                )
+            matrix[str(left["id"])] = row
+        return matrix
+
+    async def async_merge_duplicates(self) -> dict[str, Any]:
+        """Merge near-duplicate memories and personality lines into the newest of each group."""
+        from .runtime import get_assist_runtime
+
+        settings = read_memory_settings(self.hass)
+        memories = await self._memory.async_list_raw()
+        memory_matrix = await self.async_similarity_matrix(memories)
+        if memory_matrix is None:
+            return {
+                "ok": False,
+                "message": "Embeddings are not available yet, so no duplicates were merged.",
+                "memory_groups": [],
+                "personality_groups": [],
+            }
+        memory_groups = plan_duplicate_merges(
+            memories, memory_matrix, settings.dedupe_threshold
+        )
+        for group in memory_groups:
+            deleted = await self._memory.async_delete_ids(
+                {str(item["id"]) for item in group["remove"]}
+            )
+            deleted_ids = {str(item.get("id")) for item in deleted}
+            group["remove"] = [
+                item for item in group["remove"] if str(item.get("id")) in deleted_ids
+            ]
+            for item in group["remove"]:
+                _LOGGER.warning(
+                    "Merged duplicate memory %s into %s. Removed: %s. Kept: %s.",
+                    item.get("id"),
+                    group["keep"].get("id"),
+                    item.get("text"),
+                    group["keep"].get("text"),
+                )
+
+        personality = get_assist_runtime(self.hass).personality
+        instructions = await personality.async_view()
+        personality_groups: list[dict[str, Any]] = []
+        if len(instructions) >= 2:
+            personality_matrix = await self.async_similarity_matrix(instructions)
+            if personality_matrix is None:
+                _LOGGER.warning(
+                    "Could not score personality instructions, so those duplicates were left in place"
+                )
+            else:
+                personality_groups = plan_duplicate_merges(
+                    instructions, personality_matrix, settings.dedupe_threshold
+                )
+                for group in personality_groups:
+                    deleted = await personality.async_delete_ids(
+                        {str(item["id"]) for item in group["remove"]}
+                    )
+                    deleted_ids = {str(item.get("id")) for item in deleted}
+                    group["remove"] = [
+                        item
+                        for item in group["remove"]
+                        if str(item.get("id")) in deleted_ids
+                    ]
+                    for item in group["remove"]:
+                        _LOGGER.warning(
+                            "Merged duplicate personality instruction %s into %s. Removed: %s. Kept: %s.",
+                            item.get("id"),
+                            group["keep"].get("id"),
+                            item.get("text"),
+                            group["keep"].get("text"),
+                        )
+        await self._memory.async_set_merge_revision()
+        return {
+            "ok": True,
+            "message": format_merge_result(memory_groups, personality_groups),
+            "memory_groups": memory_groups,
+            "personality_groups": personality_groups,
+        }
+
+    async def _maybe_merge_duplicates(self) -> None:
+        """Run the upgrade merge once, after the local model is loaded."""
+        try:
+            if await self._memory.async_get_merge_revision() >= 1:
+                return
+            result = await self.async_merge_duplicates()
+            if not result.get("ok"):
+                _LOGGER.warning("Duplicate cleanup skipped: %s", result.get("message"))
+                return
+            removed = sum(len(group["remove"]) for group in result["memory_groups"])
+            removed += sum(len(group["remove"]) for group in result["personality_groups"])
+            if removed:
+                _LOGGER.warning(
+                    "Duplicate cleanup removed %d older item(s) and kept the newest text in each group.",
+                    removed,
+                )
+            else:
+                _LOGGER.info("Duplicate cleanup found nothing to merge.")
+        except Exception as err:
+            _LOGGER.warning("Duplicate cleanup failed: %s", err)
+
+    async def _embed_texts(
+        self,
+        settings: MemorySettings,
+        texts: list[str],
+        *,
+        query_count: int,
+    ) -> list[list[float]] | None:
+        """Embed texts. The first ``query_count`` items are queries; the rest are passages."""
+        if settings.provider == EMBEDDING_PROVIDER_OPENAI:
+            return await self._openai_embed(settings, texts)
+        if not self.is_ready(settings.local_model):
+            return None
+        spec = local_model_spec(settings.local_model)
+        prefixed = [
+            apply_prefix(text, spec, "query" if index < query_count else "passage")
+            for index, text in enumerate(texts)
+        ]
+        return await self._embed_loaded(prefixed)
 
     async def _download(self, spec, directory: Path) -> None:
         timeout = aiohttp.ClientTimeout(total=_DOWNLOAD_TIMEOUT_SECONDS)

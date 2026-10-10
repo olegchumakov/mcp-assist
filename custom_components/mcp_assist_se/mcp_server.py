@@ -36,7 +36,14 @@ from .const import (
     DEFAULT_ALLOWED_IPS,
     DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
 )
-from .memory_rank import looks_like_personality_request
+from .memory_rank import (
+    format_forget_result,
+    format_remember_result,
+    looks_like_personality_request,
+    select_duplicate,
+    select_forget_matches,
+)
+from .memory_settings import read_memory_settings
 from .runtime import get_assist_runtime
 from .discovery import EntityDiscovery
 from .domain_registry import (
@@ -334,10 +341,31 @@ class MCPServer:
         )
 
         try:
-            stored = await self._memory().remember(
+            settings = read_memory_settings(self.hass)
+            existing = await self._memory().async_list_raw()
+            similarities = await self._score_items(memory_text, existing)
+            category_text = str(category).strip() if category is not None else ""
+            duplicate = select_duplicate(
+                existing,
                 memory_text,
-                category=category,
+                category_text or None,
+                similarities,
+                settings.dedupe_threshold,
             )
+            replaced_text = None
+            if duplicate:
+                replaced_text = str(duplicate.get("text") or "")
+                stored = await self._memory().async_replace(
+                    str(duplicate["id"]),
+                    memory_text,
+                    category=category_text or None,
+                    set_category=bool(category_text),
+                )
+            else:
+                stored = await self._memory().remember(
+                    memory_text,
+                    category=category,
+                )
         except Exception as err:
             _LOGGER.error("Failed to store memory: %s", err)
             return {
@@ -347,7 +375,7 @@ class MCPServer:
 
         self.publish_progress(
             "tool_complete",
-            "Memory stored",
+            "Memory updated" if replaced_text else "Memory stored",
             tool="remember_memory",
             memory_id=stored["id"],
         )
@@ -358,21 +386,15 @@ class MCPServer:
             )
         )
 
-        category_text = (
-            f" Category: {stored['category']}." if stored.get("category") else ""
-        )
-
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": (
-                        f"Stored memory [{stored['id']}].{category_text} "
-                        "It is kept until the user asks to forget it."
-                    ),
+                    "text": format_remember_result(stored, replaced_text=replaced_text),
                 }
             ],
             "memory": stored,
+            "replaced_duplicate": bool(replaced_text),
         }
 
     async def tool_recall_memories(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -441,25 +463,134 @@ class MCPServer:
             "result_count": result["total_found"],
         }
 
+    async def _score_items(
+        self,
+        query: str,
+        items: list,
+    ) -> dict[str, float] | None:
+        """Score items against a query. None means the embedding model is not ready."""
+        if not query or not items:
+            return {}
+        try:
+            return await get_assist_runtime(self.hass).embeddings.async_similarities(
+                query, items
+            )
+        except Exception as err:
+            _LOGGER.warning("Similarity scoring failed, using stem match only: %s", err)
+            return None
+
+    async def _forget_across_stores(
+        self,
+        *,
+        memory_id: str | None,
+        instruction_id: str | None,
+        query: str | None,
+        category: str | None,
+        delete_all: bool,
+        search_memories: bool,
+        search_personality: bool,
+    ) -> Dict[str, Any]:
+        """Delete matching memories and, when the id is unknown, personality lines too."""
+        settings = read_memory_settings(self.hass)
+        deleted_memories: list = []
+        deleted_personality: list = []
+        searched_memories = search_memories and self._memory_tools_enabled()
+        searched_personality = search_personality and self._personality_enabled()
+
+        if memory_id:
+            deleted_memories = await self._memory().async_delete_ids({memory_id})
+            searched_personality = False
+            searched_memories = True
+        elif searched_memories and (query or category):
+            memories = await self._memory().async_list_raw()
+            similarities = await self._score_items(query or "", memories) if query else None
+            matches = select_forget_matches(
+                memories,
+                query,
+                category=category,
+                delete_all=delete_all,
+                similarities=similarities,
+                threshold=settings.forget_threshold,
+            )
+            deleted_memories = await self._memory().async_delete_ids(
+                {str(item["id"]) for item in matches}
+            )
+
+        if instruction_id:
+            deleted_personality = await self._personality().async_delete_ids({instruction_id})
+            searched_personality = True
+            if not query:
+                searched_memories = False
+        elif searched_personality and query:
+            instructions = await self._personality().async_view()
+            similarities = await self._score_items(query, instructions)
+            matches = select_forget_matches(
+                instructions,
+                query,
+                delete_all=delete_all,
+                similarities=similarities,
+                threshold=settings.forget_threshold,
+            )
+            deleted_personality = await self._personality().async_delete_ids(
+                {str(item["id"]) for item in matches}
+            )
+
+        message = format_forget_result(
+            deleted_memories,
+            deleted_personality,
+            searched_personality=searched_personality,
+            searched_memories=searched_memories,
+        )
+        deleted_count = len(deleted_memories) + len(deleted_personality)
+        return {
+            "content": [{"type": "text", "text": message}],
+            "isError": deleted_count == 0,
+            "deleted_count": deleted_count,
+            "deleted": deleted_memories,
+            "removed_personality": deleted_personality,
+        }
+
     async def tool_forget_memory(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Delete stored memories by id or query."""
+        """Delete stored memories, and personality lines when the query is not an id."""
         memory_id = args.get("memory_id")
         query = args.get("query")
         category = args.get("category")
         forget_all_matches = bool(args.get("forget_all_matches", False))
+        memory_id_text = None if memory_id is None else str(memory_id).strip()
+        query_text = None if query is None else str(query)
 
         self.publish_progress(
             "tool_start",
             "Deleting stored memory",
             tool="forget_memory",
         )
+        if not memory_id_text and not (query_text and query_text.strip()) and not (
+            category and str(category).strip()
+        ):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "DELETED NOTHING. memory_id, query, or category is required. "
+                            "Tell the user that nothing was deleted."
+                        ),
+                    }
+                ],
+                "isError": True,
+                "deleted_count": 0,
+                "deleted": [],
+            }
 
         try:
-            result = await self._memory().forget(
-                memory_id=None if memory_id is None else str(memory_id),
-                query=None if query is None else str(query),
+            result = await self._forget_across_stores(
+                memory_id=memory_id_text or None,
+                instruction_id=None,
+                query=query_text,
                 category=None if category is None else str(category),
-                delete_all_matches=forget_all_matches,
+                delete_all=forget_all_matches,
+                search_memories=True,
+                search_personality=not memory_id_text,
             )
         except Exception as err:
             _LOGGER.error("Failed to forget memory: %s", err)
@@ -472,31 +603,9 @@ class MCPServer:
             "tool_complete",
             "Memory deletion complete",
             tool="forget_memory",
-            deleted=result["deleted_count"],
+            deleted=result.get("deleted_count", 0),
         )
-
-        if result["deleted_count"] == 0:
-            return {
-                "content": [{"type": "text", "text": "No matching memories were deleted."}],
-                "deleted_count": 0,
-                "deleted": [],
-            }
-
-        deleted = result["deleted"]
-        lines = [f"Deleted {result['deleted_count']} memory item(s):"]
-        for memory in deleted[:10]:
-            category_text = (
-                f" [{memory['category']}]" if memory.get("category") else ""
-            )
-            lines.append(f"- {memory['id']}{category_text}: {memory['text']}")
-        if len(deleted) > 10:
-            lines.append(f"{len(deleted) - 10} additional deleted memories were omitted.")
-
-        return {
-            "content": [{"type": "text", "text": "\n".join(lines)}],
-            "deleted_count": result["deleted_count"],
-            "deleted": deleted,
-        }
+        return result
 
     def _format_personality_lines(self, instructions: list) -> str:
         """Format personality instructions for a tool result."""
@@ -531,10 +640,23 @@ class MCPServer:
         """Add or replace one personality instruction."""
         text = " ".join(str(args.get("instruction") or "").split()).strip()
         instruction_id = args.get("instruction_id")
+        instruction_id_text = None if instruction_id is None else str(instruction_id).strip()
         try:
+            if text and not instruction_id_text:
+                existing = await self._personality().async_view()
+                similarities = await self._score_items(text, existing)
+                duplicate = select_duplicate(
+                    existing,
+                    text,
+                    None,
+                    similarities,
+                    read_memory_settings(self.hass).dedupe_threshold,
+                )
+                if duplicate:
+                    instruction_id_text = str(duplicate["id"])
             result = await self._personality().async_set(
                 text,
-                instruction_id=None if instruction_id is None else str(instruction_id),
+                instruction_id=instruction_id_text,
             )
         except Exception as err:
             _LOGGER.error("Failed to update personality: %s", err)
@@ -551,13 +673,33 @@ class MCPServer:
     async def tool_remove_personality_instruction(
         self, args: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Remove one personality instruction."""
+        """Remove personality instructions, and memories about the same subject when the id is unknown."""
         instruction_id = args.get("instruction_id")
         query = args.get("query")
+        instruction_id_text = None if instruction_id is None else str(instruction_id).strip()
+        query_text = None if query is None else str(query)
+        if not instruction_id_text and not (query_text and query_text.strip()):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "DELETED NOTHING. instruction_id or query is required. "
+                            "Tell the user that nothing was removed."
+                        ),
+                    }
+                ],
+                "isError": True,
+            }
         try:
-            result = await self._personality().async_remove(
-                instruction_id=None if instruction_id is None else str(instruction_id),
-                query=None if query is None else str(query),
+            result = await self._forget_across_stores(
+                memory_id=None,
+                instruction_id=instruction_id_text or None,
+                query=query_text,
+                category=None,
+                delete_all=False,
+                search_memories=not instruction_id_text and self._memory_tools_enabled(),
+                search_personality=True,
             )
         except Exception as err:
             _LOGGER.error("Failed to remove personality instruction: %s", err)
@@ -567,10 +709,24 @@ class MCPServer:
                 ],
                 "isError": True,
             }
+        return result
+
+    async def tool_merge_duplicate_memories(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge near-duplicates into the newest entry of each group."""
+        del args
+        try:
+            result = await get_assist_runtime(self.hass).embeddings.async_merge_duplicates()
+        except Exception as err:
+            _LOGGER.warning("Failed to merge duplicate memories: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to merge duplicates: {err}"}],
+                "isError": True,
+            }
         return {
-            "content": [{"type": "text", "text": result["message"]}],
+            "content": [{"type": "text", "text": result.get("message") or "Nothing was merged."}],
             "isError": not result.get("ok", False),
-            "removed": result.get("removed", []),
+            "memory_groups": result.get("memory_groups", []),
+            "personality_groups": result.get("personality_groups", []),
         }
 
     async def tool_reset_personality(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1197,7 +1353,7 @@ class MCPServer:
             },
             {
                 "name": "set_personality_instruction",
-                "description": "Add a speaking-style, persona, tone, or form-of-address instruction, or replace one when instruction_id is set. Use this for requests like 'talk to me like a pirate' or 'говори со мной как пират'. Do not store those with remember_memory. The instruction applies on later turns and should also be followed in this reply.",
+                "description": "Add a speaking-style, persona, tone, or form-of-address instruction, or replace one when instruction_id is set. If a stored instruction is about the same style, this updates that instruction instead of adding a duplicate. Use this for requests like 'talk to me like a pirate' or 'говори со мной как пират'. Do not store those with remember_memory. The instruction applies on later turns and should also be followed in this reply.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1217,7 +1373,7 @@ class MCPServer:
             },
             {
                 "name": "remove_personality_instruction",
-                "description": "Remove one personality instruction by id or by a short quote from its text.",
+                "description": "Remove personality instructions by id or by a query. Russian inflections match (пиратов matches пират). When the id is unknown, this also deletes stored memories about the same subject. If the user says to forget everything about a subject, put that phrase in query. If the result says DELETED NOTHING, tell the user nothing was removed. Do not claim you forgot it.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1556,7 +1712,7 @@ class MCPServer:
                 [
                     {
                         "name": "remember_memory",
-                        "description": "Store a fact or preference for later recall. Use this only when the user explicitly asks you to remember something about people, the home, devices, schedules, or favourites. Do not use it for speaking style or persona; use set_personality_instruction for that. Memories persist until the user asks you to forget them.",
+                        "description": "Store a fact or preference for later recall. If a stored memory is already about the same subject, that memory is updated in place and a second copy is not added. Use this only when the user explicitly asks you to remember something about people, the home, devices, schedules, or favourites. Do not use it for speaking style or persona; use set_personality_instruction for that. Memories persist until the user asks you to forget them.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1603,7 +1759,7 @@ class MCPServer:
                     },
                     {
                         "name": "forget_memory",
-                        "description": "Delete one stored memory by id or by query/category match. Use this when the user asks you to forget or update something previously remembered.",
+                        "description": "Delete stored memories about a subject. Also deletes a matching personality instruction when you pass a query instead of a memory_id, so a style saved in either store is removed. Russian inflections match: query пиратов deletes a memory that says пират. Set forget_all_matches true when the user says to forget everything about a subject (забудь всё про ...). If the result says DELETED NOTHING, tell the user nothing was deleted. Do not claim success.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1622,10 +1778,21 @@ class MCPServer:
                                 },
                                 "forget_all_matches": {
                                     "type": "boolean",
-                                    "description": "Delete every matching memory instead of only the best match.",
+                                    "description": "Delete every matching memory and personality instruction, not only the best match. Set true for 'forget everything about X' or 'забудь всё про ...'.",
                                     "default": False,
                                 },
                             },
+                            "required": [],
+                            "additionalProperties": False,
+                        },
+                    },
+                    {
+                        "name": "merge_duplicate_memories",
+                        "description": "Merge near-duplicate memories and personality instructions into the newest entry of each group. Use when the user asks to clean up duplicate memories. Older wording is removed only when it is about the same subject. The result lists every removed line and the text that was kept.",
+                        "inputSchema": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                            "properties": {},
                             "required": [],
                             "additionalProperties": False,
                         },
@@ -1683,6 +1850,8 @@ class MCPServer:
             return await self.tool_recall_memories(arguments)
         elif tool_name == "forget_memory":
             return await self.tool_forget_memory(arguments)
+        elif tool_name == "merge_duplicate_memories":
+            return await self.tool_merge_duplicate_memories(arguments)
         elif tool_name == "view_personality":
             return await self.tool_view_personality(arguments)
         elif tool_name == "set_personality_instruction":

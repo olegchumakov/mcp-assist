@@ -15,10 +15,17 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
-from .memory_rank import normalize_text, public_memory, rank_memories, round_vector
+from .memory_rank import (
+    normalize_text,
+    public_memory,
+    rank_memories,
+    round_vector,
+    select_forget_matches,
+)
 
 _STORAGE_VERSION = 1
 _STORAGE_KEY = f"{DOMAIN}_memory_store"
+_DUPLICATE_MERGE_REVISION = 1
 
 
 class MemoryManager:
@@ -35,6 +42,7 @@ class MemoryManager:
         self._lock = asyncio.Lock()
         self._loaded = False
         self._memories: list[dict[str, Any]] = []
+        self._merge_revision = 0
 
     async def async_initialize(self) -> None:
         """Load persisted memories."""
@@ -70,6 +78,69 @@ class MemoryManager:
             await self._save_locked()
 
         return dict(memory)
+
+    async def async_replace(
+        self,
+        memory_id: str,
+        text: str,
+        *,
+        category: str | None = None,
+        set_category: bool = False,
+    ) -> dict[str, Any]:
+        """Replace the text of an existing memory. The id stays. The new fact wins."""
+        normalized_text = normalize_text(text)
+        if not normalized_text:
+            raise ValueError("memory text is required")
+        target_id = normalize_text(memory_id)
+        if not target_id:
+            raise ValueError("memory_id is required")
+
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            for memory in self._memories:
+                if memory["id"] != target_id:
+                    continue
+                memory["text"] = normalized_text
+                if set_category:
+                    memory["category"] = normalize_text(category)
+                memory["updated_at"] = dt_util.utcnow().isoformat()
+                memory.pop("embedding", None)
+                memory.pop("embedding_model", None)
+                await self._save_locked()
+                return dict(memory)
+        raise ValueError(f"memory {target_id} was not found")
+
+    async def async_delete_ids(self, memory_ids: set[str]) -> list[dict[str, Any]]:
+        """Delete memories by id. Unknown ids are ignored."""
+        targets = {item_id for item_id in memory_ids if item_id}
+        if not targets:
+            return []
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            deleted: list[dict[str, Any]] = []
+            kept: list[dict[str, Any]] = []
+            for memory in self._memories:
+                if memory["id"] in targets:
+                    deleted.append(public_memory(memory))
+                else:
+                    kept.append(memory)
+            self._memories = kept
+            if deleted:
+                await self._save_locked()
+        return deleted
+
+    async def async_get_merge_revision(self) -> int:
+        """Revision of the one-time duplicate merge. 0 means it has not run."""
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            return self._merge_revision
+
+    async def async_set_merge_revision(self, revision: int = _DUPLICATE_MERGE_REVISION) -> None:
+        """Record that duplicate merging has run for this store."""
+        async with self._lock:
+            await self._ensure_loaded_locked()
+            self._merge_revision = int(revision)
+            await self._save_locked()
 
     async def recall(
         self,
@@ -123,20 +194,21 @@ class MemoryManager:
             if normalized_id:
                 target_ids = {normalized_id}
             else:
-                ranked = rank_memories(
+                # Stem match only. The tool path also passes embedding scores.
+                ranked = select_forget_matches(
                     list(self._memories),
-                    query=normalized_query,
+                    normalized_query,
                     category=normalized_category,
+                    delete_all=delete_all_matches,
+                    similarities=None,
+                    threshold=1.0,
                 )
                 if not ranked:
                     return {
                         "deleted": [],
                         "deleted_count": 0,
                     }
-                if delete_all_matches:
-                    target_ids = {item["id"] for item in ranked}
-                else:
-                    target_ids = {ranked[0]["id"]}
+                target_ids = {item["id"] for item in ranked}
 
             kept: list[dict[str, Any]] = []
             for memory in self._memories:
@@ -199,6 +271,10 @@ class MemoryManager:
 
         stored = await self._store.async_load()
         raw_items = stored.get("items", []) if isinstance(stored, dict) else []
+        try:
+            self._merge_revision = int(stored.get("duplicate_merge_revision") or 0) if isinstance(stored, dict) else 0
+        except (TypeError, ValueError):
+            self._merge_revision = 0
         self._memories = [
             normalized
             for item in raw_items
@@ -208,7 +284,12 @@ class MemoryManager:
 
     async def _save_locked(self) -> None:
         """Persist the current memory list."""
-        await self._store.async_save({"items": list(self._memories)})
+        await self._store.async_save(
+            {
+                "items": list(self._memories),
+                "duplicate_merge_revision": self._merge_revision,
+            }
+        )
 
     def _normalize_loaded_memory(self, item: Any) -> dict[str, Any] | None:
         """Normalize a loaded memory entry from storage."""
@@ -227,6 +308,9 @@ class MemoryManager:
             "category": normalize_text(item.get("category")),
             "created_at": created_at,
         }
+        updated_at = normalize_text(item.get("updated_at"))
+        if updated_at:
+            loaded["updated_at"] = updated_at
         embedding_model = normalize_text(item.get("embedding_model"))
         embedding = item.get("embedding")
         if embedding_model and isinstance(embedding, list) and embedding:

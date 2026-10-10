@@ -17,6 +17,8 @@ from .const import (
     CONF_ENABLE_PERSONALITY,
     CONF_LOCAL_EMBEDDING_MODEL,
     CONF_MEMORY_AUTO_RETRIEVE,
+    CONF_MEMORY_DEDUPE_THRESHOLD,
+    CONF_MEMORY_FORGET_THRESHOLD,
     CONF_MEMORY_INCLUDE_LAST_TURN,
     CONF_MEMORY_SIMILARITY_THRESHOLD,
     CONF_MEMORY_TOP_K,
@@ -27,6 +29,8 @@ from .const import (
     DEFAULT_ENABLE_PERSONALITY,
     DEFAULT_LOCAL_EMBEDDING_MODEL,
     DEFAULT_MEMORY_AUTO_RETRIEVE,
+    DEFAULT_MEMORY_DEDUPE_THRESHOLD,
+    DEFAULT_MEMORY_FORGET_THRESHOLD,
     DEFAULT_MEMORY_INCLUDE_LAST_TURN,
     DEFAULT_MEMORY_SIMILARITY_THRESHOLD,
     DEFAULT_MEMORY_TOP_K,
@@ -36,6 +40,14 @@ from .const import (
 from .local_embedder import canonical_local_model, local_model_spec
 
 _TRUE_STRINGS = {"1", "true", "yes", "on"}
+
+
+def _clamped_float(value: Any, default: float) -> float:
+    try:
+        number = float(default if value is None else value)
+    except (TypeError, ValueError):
+        number = default
+    return max(0.0, min(1.0, number))
 
 
 def as_bool(value: Any, default: bool) -> bool:
@@ -67,6 +79,12 @@ def normalize_memory_options(user_input: dict[str, Any] | None) -> dict[str, Any
     except (TypeError, ValueError):
         threshold = DEFAULT_MEMORY_SIMILARITY_THRESHOLD
     threshold = max(0.0, min(1.0, threshold))
+    dedupe_threshold = _clamped_float(
+        source.get(CONF_MEMORY_DEDUPE_THRESHOLD), DEFAULT_MEMORY_DEDUPE_THRESHOLD
+    )
+    forget_threshold = _clamped_float(
+        source.get(CONF_MEMORY_FORGET_THRESHOLD), DEFAULT_MEMORY_FORGET_THRESHOLD
+    )
 
     openai_model = " ".join(
         str(source.get(CONF_EMBEDDING_MODEL) or DEFAULT_EMBEDDING_MODEL).split()
@@ -82,6 +100,8 @@ def normalize_memory_options(user_input: dict[str, Any] | None) -> dict[str, Any
         ),
         CONF_MEMORY_TOP_K: top_k,
         CONF_MEMORY_SIMILARITY_THRESHOLD: threshold,
+        CONF_MEMORY_DEDUPE_THRESHOLD: dedupe_threshold,
+        CONF_MEMORY_FORGET_THRESHOLD: forget_threshold,
         CONF_MEMORY_INCLUDE_LAST_TURN: as_bool(
             source.get(CONF_MEMORY_INCLUDE_LAST_TURN), DEFAULT_MEMORY_INCLUDE_LAST_TURN
         ),
@@ -103,6 +123,8 @@ class MemorySettings:
     auto_retrieve: bool
     top_k: int
     threshold: float
+    dedupe_threshold: float
+    forget_threshold: float
     include_last_turn: bool
     provider: str
     local_model: str
@@ -142,6 +164,8 @@ def read_memory_settings(hass) -> MemorySettings:
         auto_retrieve=normalized[CONF_MEMORY_AUTO_RETRIEVE],
         top_k=normalized[CONF_MEMORY_TOP_K],
         threshold=normalized[CONF_MEMORY_SIMILARITY_THRESHOLD],
+        dedupe_threshold=normalized[CONF_MEMORY_DEDUPE_THRESHOLD],
+        forget_threshold=normalized[CONF_MEMORY_FORGET_THRESHOLD],
         include_last_turn=normalized[CONF_MEMORY_INCLUDE_LAST_TURN],
         provider=normalized[CONF_EMBEDDING_PROVIDER],
         local_model=spec.model_id,

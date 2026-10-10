@@ -253,6 +253,16 @@ CONF_MEMORY_SIMILARITY_THRESHOLD = "memory_similarity_threshold"
 # 0.83-0.95 and unrelated ones around 0.60-0.74. Raise it if the wrong
 # fact is injected. multilingual-e5-small may need a different value.
 DEFAULT_MEMORY_SIMILARITY_THRESHOLD = 0.78
+# Same-subject replacement. Measured on rubert-tiny-turbo:
+# "Меня зовут Олег" vs "Пользователя зовут Олег." = 0.92,
+# the two "яркий белый свет" value variants = 0.82,
+# unrelated stored facts about 0.60-0.70.
+CONF_MEMORY_DEDUPE_THRESHOLD = "memory_dedupe_threshold"
+DEFAULT_MEMORY_DEDUPE_THRESHOLD = 0.80
+# Semantic forget. "забудь всё про пиратов" vs "разговаривать как пират" = 0.81.
+# Inflection also matches by stem below this score.
+CONF_MEMORY_FORGET_THRESHOLD = "memory_forget_threshold"
+DEFAULT_MEMORY_FORGET_THRESHOLD = 0.80
 CONF_MEMORY_INCLUDE_LAST_TURN = "memory_include_last_turn"
 DEFAULT_MEMORY_INCLUDE_LAST_TURN = True
 CONF_EMBEDDING_PROVIDER = "embedding_provider"
@@ -272,7 +282,11 @@ Memory tools are enabled.
 - Store a fact or preference with remember_memory only when the user explicitly asks you to remember something about people, the home, devices, schedules, or favourites.
 - Do not use remember_memory for speaking style, persona, tone, or how to address the user. Those go in the personality block with set_personality_instruction.
 - Relevant memories are injected automatically as "Remembered facts" when they match the current request. Use them. Call recall_memories only when the user asks what you remember, or when the injected facts are not enough.
-- Use forget_memory when the user asks you to forget a stored fact.
+- Use forget_memory when the user asks you to forget, delete, or stop something you stored. Russian inflections match: "пиратов" matches a memory that says "пират".
+- When the user says to forget everything about a subject ("забудь всё про ...", "forget everything about ..."), set forget_all_matches to true.
+- forget_memory also searches the personality block when you do not have an id. If a style lives there, it is removed too.
+- If the tool says DELETED NOTHING, tell the user that nothing was removed. Do not claim you forgot it.
+- remember_memory updates an existing memory about the same subject instead of storing a near-duplicate. The new wording wins.
 - Memories persist until the user explicitly asks to forget them. There is no automatic expiry.
 """
 
@@ -281,5 +295,8 @@ Personality tools are enabled.
 - Speaking style, persona, tone, and forms of address live in the personality block and are applied on every later turn.
 - Use view_personality to read it, set_personality_instruction to add or replace one instruction, remove_personality_instruction to delete one, and reset_personality to clear it.
 - A request such as "talk to me like a pirate" or "говори со мной как пират" updates the personality block. It is not a memory.
+- If the user says to forget or stop a speaking style, call remove_personality_instruction. When you are not sure which store holds it, that tool also searches memories.
+- A new instruction about the same style replaces the existing one instead of adding a second copy.
 - If the user replaces a style, replace the existing instruction or reset the block. Do not keep contradictory styles.
+- If the tool says nothing was removed, do not tell the user that you forgot it.
 """

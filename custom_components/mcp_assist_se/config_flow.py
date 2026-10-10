@@ -56,6 +56,8 @@ from .const import (
     CONF_MEMORY_AUTO_RETRIEVE,
     CONF_MEMORY_TOP_K,
     CONF_MEMORY_SIMILARITY_THRESHOLD,
+    CONF_MEMORY_DEDUPE_THRESHOLD,
+    CONF_MEMORY_FORGET_THRESHOLD,
     CONF_MEMORY_INCLUDE_LAST_TURN,
     CONF_EMBEDDING_PROVIDER,
     CONF_LOCAL_EMBEDDING_MODEL,
@@ -185,6 +187,28 @@ def memory_settings_schema(current: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_MEMORY_SIMILARITY_THRESHOLD,
                 default=normalized[CONF_MEMORY_SIMILARITY_THRESHOLD],
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=1,
+                    step=0.01,
+                    mode=NumberSelectorMode.SLIDER,
+                )
+            ),
+            vol.Required(
+                CONF_MEMORY_DEDUPE_THRESHOLD,
+                default=normalized[CONF_MEMORY_DEDUPE_THRESHOLD],
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=1,
+                    step=0.01,
+                    mode=NumberSelectorMode.SLIDER,
+                )
+            ),
+            vol.Required(
+                CONF_MEMORY_FORGET_THRESHOLD,
+                default=normalized[CONF_MEMORY_FORGET_THRESHOLD],
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=0,
