@@ -290,7 +290,9 @@ Memory tools are enabled.
 - When the user says to forget everything about a subject ("забудь всё про ...", "forget everything about ..."), set forget_all_matches to true.
 - forget_memory also searches the personality block when you do not have an id. If a style lives there, it is removed too.
 - If the tool says DELETED NOTHING, tell the user that nothing was removed. Do not claim you forgot it.
-- If remember_memory says NOT STORED and lists similar memories, nothing was written. Call it again with mode=add (different fact), mode=update plus memory_id and a merged wording (same fact), or mode=noop (already known). Never update a different fact. "Олега зовут хозяином" is not the same fact as "Меня зовут Олег".
+- Call remember_memory once, with the fact only. Do not pass mode or memory_id. The server stores a new fact, updates the same fact, or says it is already stored.
+- If remember_memory says NOOP or UPDATED or Stored, stop. Do not call it again.
+- If it says NOT STORED, nothing was written. Do not call mode=add. A category such as user_name is not a memory_id. Copy an id from the list only when you are updating that exact row. "Олега зовут хозяином" is not the same fact as "Меня зовут Олег".
 - Memories persist until the user explicitly asks to forget them. There is no automatic expiry.
 """
 
@@ -300,7 +302,7 @@ Personality tools are enabled.
 - Use view_personality to read it, set_personality_instruction to add or replace one instruction, remove_personality_instruction to delete one, and reset_personality to clear it.
 - A request such as "talk to me like a pirate" or "говори со мной как пират" updates the personality block. It is not a memory.
 - If the user says to forget or stop a speaking style, call remove_personality_instruction. When you are not sure which store holds it, that tool also searches memories.
-- If set_personality_instruction says NOT STORED and lists similar instructions, call it again with mode=add, mode=update plus instruction_id and the merged wording, or mode=noop. Do not replace a different instruction.
+- Call set_personality_instruction once, with the instruction only. The server decides whether it is new, an update, or already stored. If it says NOT STORED, do not call mode=add and do not invent an instruction_id.
 - If the user replaces a style, replace the existing instruction or reset the block. Do not keep contradictory styles.
 - If the tool says nothing was removed, do not tell the user that you forgot it.
 """

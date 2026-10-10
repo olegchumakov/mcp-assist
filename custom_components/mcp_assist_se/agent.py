@@ -1738,7 +1738,14 @@ class MCPAssistConversationEntity(ConversationEntity):
             payload = {
                 "jsonrpc": "2.0",
                 "method": "tools/call",
-                "params": {"name": tool_name, "arguments": arguments},
+                "params": {
+                    "name": tool_name,
+                    "arguments": arguments,
+                    "context": {
+                        "conversation_id": getattr(self, "_current_conversation_id", "")
+                        or ""
+                    },
+                },
                 "id": request_id,
             }
 

@@ -1,20 +1,14 @@
 # Memory and personality
 
-MCP Assist SE 0.22.2 keeps two different kinds of long-term context.
+MCP Assist SE 0.22.3 keeps two different kinds of long-term context.
 
 ## Facts
 
 `remember_memory`, `recall_memories`, and `forget_memory` store facts and preferences until you ask to forget them. There is no expiry.
 
-`remember_memory` does not overwrite by similarity. The first call stores a new fact when nothing similar is already there. If existing memories score at or above the candidate threshold (0.65 by default), the tool stores nothing and returns those rows with ids. The assistant then calls again:
+`remember_memory` is one call. The server decides. An exact or normalized duplicate (`Меня зовут Олег` and `меня зовут олег.`) is a noop for every mode, including `mode=add`. A near-copy at or above 0.91 is also a noop, so a name paraphrase is not stored again. `mode=add` does not skip those checks. With no earlier candidate list in this conversation, or after an update that used an id that does not exist, `mode=add` returns the similar rows and their real ids and stores nothing.
 
-| mode | What happens |
-| --- | --- |
-| `add` | Store the new text as its own memory, even if something similar exists. |
-| `update` | Rewrite the `memory_id` you choose. Put the merged wording in `memory`. |
-| `noop` | Store nothing. The fact is already known. |
-
-An identical sentence is a noop without a second call. A different fact, such as «Олега зовут хозяином» next to «Меня зовут Олег», must be `add`. `set_personality_instruction` uses the same three modes.
+An unknown id such as `user_name` does not write a row. The tool returns the similar rows and their real ids. If that token is the category of exactly one of those rows, that row is updated. A different fact, such as «Олега зовут хозяином» next to «Меня зовут Олег», is not overwritten. When the score sits between 0.65 and 0.91 and the caller did not force `mode=add`, one short non-streaming decision (3 second cap) chooses add, update, or noop. If that call fails, nothing is stored. `set_personality_instruction` uses the same rules.
 
 `forget_memory` matches Russian inflections by stem, so «пиратов» and «пиратах» find «пират». It also deletes every sufficiently similar item when you say to forget everything about a subject, or when `forget_all_matches` is true. The forget threshold defaults to 0.80. A result of `DELETED NOTHING` means nothing was removed. A query also searches the personality block, and `remove_personality_instruction` searches memories when the instruction id is unknown.
 

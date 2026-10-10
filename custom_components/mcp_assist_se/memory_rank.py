@@ -5,6 +5,7 @@ No Home Assistant imports. Safe to unit-test on its own.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from typing import Any
@@ -415,15 +416,234 @@ def parse_store_mode(value: Any) -> str | None:
     return "invalid"
 
 
+def memory_compare_key(text: str) -> str:
+    """Case, punctuation, and ё/е folded key for duplicate checks."""
+    folded = (normalize_text(text) or "").casefold().replace("ё", "е")
+    folded = re.sub(r"[^\w\s]+", " ", folded, flags=re.UNICODE)
+    return " ".join(folded.split())
+
+
 def find_exact_text(items: list[dict[str, Any]], text: str) -> dict[str, Any] | None:
-    """Return the stored row whose text matches exactly, ignoring case."""
-    folded = (normalize_text(text) or "").casefold()
-    if not folded:
+    """Return the stored row with the same normalized text."""
+    key = memory_compare_key(text)
+    if not key:
         return None
     for item in items:
-        if (normalize_text(item.get("text")) or "").casefold() == folded:
+        if memory_compare_key(str(item.get("text") or "")) == key:
             return dict(item)
     return None
+
+
+def _item_by_id(items: list[dict[str, Any]], item_id: str) -> dict[str, Any] | None:
+    wanted = (item_id or "").strip()
+    if not wanted:
+        return None
+    for item in items:
+        if str(item.get("id") or "") == wanted:
+            return dict(item)
+    return None
+
+
+def unique_category_candidate(
+    candidates: list[dict[str, Any]], category_token: str
+) -> dict[str, Any] | None:
+    """Return the only similar row whose category is exactly this token.
+
+    A category name is not an id. It selects a row only when one candidate
+    carries that category.
+    """
+    key = memory_compare_key(category_token)
+    if not key:
+        return None
+    matches = [
+        item
+        for item in candidates
+        if memory_compare_key(str(item.get("category") or "")) == key
+    ]
+    if len(matches) != 1:
+        return None
+    return dict(matches[0])
+
+
+def parse_llm_store_decision(raw: str, allowed_ids: set[str]) -> dict[str, Any] | None:
+    """Parse a strict add/update/noop object. An unknown update id is rejected."""
+    if not raw or not str(raw).strip():
+        return None
+    match = re.search(r"\{.*\}", str(raw), flags=re.DOTALL)
+    if match is None:
+        return None
+    try:
+        payload = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    mode = str(payload.get("mode") or "").strip().casefold()
+    if mode not in _STORE_MODES:
+        return None
+    if mode != "update":
+        return {"mode": mode, "id": None}
+    chosen = str(payload.get("id") or "").strip()
+    if chosen not in allowed_ids:
+        return None
+    return {"mode": "update", "id": chosen}
+
+
+def format_store_decision_prompt(
+    kind: str, new_text: str, candidates: list[dict[str, Any]]
+) -> str:
+    """Short prompt for one non-streaming JSON decision."""
+    label = "memory" if kind == "memory" else "personality instruction"
+    lines = [
+        f"Decide how to store this {label}.",
+        'Reply with JSON only: {"mode":"add"|"update"|"noop","id":""}',
+        "noop: the same fact is already listed.",
+        "update: same fact, and id is copied from the list. Put the new wording on that row.",
+        "add: a different fact. Do not update a different fact.",
+        "'Олега зовут хозяином' is not the same fact as 'Меня зовут Олег'.",
+        "New:",
+        new_text,
+        "Existing:",
+    ]
+    for item in candidates:
+        lines.append(f"- {item.get('id')}: {item.get('text')}")
+    return "\n".join(lines)
+
+
+def plan_store(
+    *,
+    mode: str | None,
+    new_text: str,
+    items: list[dict[str, Any]],
+    similarities: dict[str, float] | None,
+    requested_id: str | None,
+    candidate_threshold: float,
+    near_copy_threshold: float,
+    candidates_shown: bool,
+    failed_update: bool,
+    llm: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Choose noop, add, update, or candidates. Never trusts a bare mode=add.
+
+    Exact and near-copy matches are a noop for every mode, with no model call.
+    mode=add stores only after this conversation already saw candidates and the
+    previous update of this text did not fail. An internal decision may resolve
+    an ambiguous list in the same call.
+    """
+    exact = find_exact_text(items, new_text)
+    if exact is not None:
+        return {
+            "action": "noop",
+            "reason": "exact",
+            "target_id": exact.get("id"),
+            "target": exact,
+            "candidates": [],
+        }
+    if mode == "noop":
+        return {
+            "action": "noop",
+            "reason": "mode",
+            "target_id": None,
+            "target": None,
+            "candidates": [],
+        }
+
+    candidates = select_similar_candidates(
+        items, new_text, similarities, candidate_threshold
+    )
+    requested = (requested_id or "").strip()
+    resolved: dict[str, Any] | None = None
+    if mode == "update" and requested:
+        resolved = _item_by_id(items, requested)
+        if resolved is None:
+            resolved = unique_category_candidate(candidates, requested)
+        if resolved is not None:
+            return {
+                "action": "update",
+                "reason": "id" if _item_by_id(items, requested) else "category",
+                "target_id": resolved.get("id"),
+                "target": resolved,
+                "candidates": candidates,
+            }
+
+    best = candidates[0] if candidates else None
+    best_score = float(best.get("score") or 0) if best else 0.0
+    if best is not None and best_score >= near_copy_threshold:
+        return {
+            "action": "noop",
+            "reason": "near_copy",
+            "target_id": best.get("id"),
+            "target": best,
+            "candidates": candidates,
+        }
+
+    if not candidates:
+        if mode == "update":
+            return {
+                "action": "candidates",
+                "reason": "unknown_id",
+                "target_id": None,
+                "target": None,
+                "candidates": [],
+            }
+        return {
+            "action": "add",
+            "reason": "new",
+            "target_id": None,
+            "target": None,
+            "candidates": [],
+        }
+
+    allowed = {str(item.get("id")) for item in candidates}
+    # mode=add before a candidate list, or after a failed update, cannot store
+    # just because a model said so. The internal decision still runs when the
+    # caller did not force mode=add.
+    forced_add = mode == "add" and (failed_update or not candidates_shown)
+    if llm and not forced_add:
+        llm_mode = llm.get("mode")
+        llm_id = llm.get("id")
+        if llm_mode == "noop":
+            return {
+                "action": "noop",
+                "reason": "llm",
+                "target_id": None,
+                "target": None,
+                "candidates": candidates,
+            }
+        if llm_mode == "update" and llm_id in allowed:
+            target = _item_by_id(candidates, str(llm_id))
+            return {
+                "action": "update",
+                "reason": "llm",
+                "target_id": llm_id,
+                "target": target,
+                "candidates": candidates,
+            }
+        if llm_mode == "add":
+            return {
+                "action": "add",
+                "reason": "llm",
+                "target_id": None,
+                "target": None,
+                "candidates": candidates,
+            }
+
+    if mode == "add" and candidates_shown and not failed_update:
+        return {
+            "action": "add",
+            "reason": "confirmed_add",
+            "target_id": None,
+            "target": None,
+            "candidates": candidates,
+        }
+
+    return {
+        "action": "candidates",
+        "reason": "unknown_id" if mode == "update" else "similar",
+        "target_id": None,
+        "target": None,
+        "candidates": candidates,
+    }
 
 
 def select_similar_candidates(
@@ -475,11 +695,10 @@ def format_similarity_decision(
     id_field = "memory_id" if kind == "memory" else "instruction_id"
     lines = [
         f"NOT STORED. Similar {kind} entries already exist. Nothing was written.",
-        "Call this tool again with one mode. Do not tell the user it was saved yet.",
-        "mode=add — this is a different fact. Store it as a new entry. Do not overwrite.",
-        f"mode=update plus {id_field}, and rewrite the text into one merged wording — only when it is the same fact.",
-        "mode=noop — the fact is already known. Store nothing.",
-        "A different fact must be mode=add. 'Олега зовут хозяином' does not replace 'Меня зовут Олег'.",
+        f"Do not call this tool again with mode=add unless you are correcting a different fact after reading this list.",
+        f"{id_field} must be copied from the ids below. A category name is not an id.",
+        "mode=update is rejected when the id is not in this list, and the following mode=add then stores nothing.",
+        "A different fact is not a reason to overwrite. 'Олега зовут хозяином' does not replace 'Меня зовут Олег'.",
         "Candidates:",
     ]
     for item in candidates:
@@ -490,6 +709,20 @@ def format_similarity_decision(
         lines.append(f"- {item.get('id')}{category_text} ({score_text}): {item.get('text')}")
     lines.append(f"New text: {new_text}")
     return "\n".join(lines)
+
+
+def format_noop_result(kind: str, item: dict[str, Any], reason: str) -> str:
+    """Tell the model the row is already stored and must not be copied."""
+    label = "memory" if kind == "memory" else "personality instruction"
+    why = (
+        "The same fact is already stored"
+        if reason == "near_copy"
+        else "That text is already stored"
+    )
+    return (
+        f"NOOP. {why} as {label} [{item.get('id')}]: {item.get('text')}. "
+        "Nothing was written. Do not store another copy."
+    )
 
 
 def plan_duplicate_merges(

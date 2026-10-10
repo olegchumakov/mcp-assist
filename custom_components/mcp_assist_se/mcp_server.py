@@ -23,29 +23,49 @@ from .const import (
     MCP_SERVER_NAME,
     MCP_PROTOCOL_VERSION,
     MAX_ENTITIES_PER_DISCOVERY,
+    CONF_API_KEY,
     CONF_LMSTUDIO_URL,
+    CONF_MODEL_NAME,
+    CONF_SERVER_TYPE,
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_ENABLE_MEMORY_TOOLS,
     CONF_ENABLE_PERSONALITY,
+    DEFAULT_API_KEY,
     DEFAULT_ENABLE_MEMORY_TOOLS,
     DEFAULT_ENABLE_PERSONALITY,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_MODEL_NAME,
+    GEMINI_BASE_URL,
+    OPENAI_BASE_URL,
+    OPENROUTER_BASE_URL,
+    SERVER_TYPE_GEMINI,
+    SERVER_TYPE_OLLAMA,
+    SERVER_TYPE_OPENAI,
+    SERVER_TYPE_OPENROUTER,
+    SERVER_TYPE_ANTHROPIC,
+    SERVER_TYPE_HERMES,
+    SERVER_TYPE_OPENCLAW,
 )
 from .memory_rank import (
     find_exact_text,
     format_forget_result,
+    format_noop_result,
     format_remember_result,
     format_similarity_decision,
+    format_store_decision_prompt,
     looks_like_personality_request,
+    memory_compare_key,
+    parse_llm_store_decision,
     parse_store_mode,
+    plan_store,
     select_forget_matches,
-    select_similar_candidates,
 )
+from .store_decision import complete_store_decision, openai_chat_url
 from .memory_settings import read_memory_settings
 from .runtime import get_assist_runtime
 from .discovery import EntityDiscovery
@@ -167,6 +187,9 @@ class MCPServer:
 
         # Custom tools will be initialized in start() after system entry exists
         self.custom_tools = None
+        # Per-conversation remember guards. Shown texts may be confirmed with
+        # mode=add. A failed update blocks the following mode=add.
+        self._store_guards: dict[str, dict[str, set[str]]] = {}
 
     def _get_shared_setting(self, key: str, default: Any) -> Any:
         """Get a shared setting from system entry with fallback to profile entry."""
@@ -313,7 +336,222 @@ class MCPServer:
         if self.runner:
             await self.runner.cleanup()
 
-    async def tool_remember_memory(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def _store_guard(self, conversation_id: str | None) -> dict[str, set[str]]:
+        """Return the shown/failed sets for one conversation."""
+        key = (conversation_id or "").strip() or "default"
+        guard = self._store_guards.get(key)
+        if guard is None:
+            if len(self._store_guards) >= 40:
+                self._store_guards.pop(next(iter(self._store_guards)))
+            guard = {"shown": set(), "failed": set()}
+            self._store_guards[key] = guard
+        return guard
+
+    def _chat_decision_target(self) -> tuple[str, str, str] | None:
+        """OpenAI-compatible chat settings for one short store decision."""
+        entry = self.entry
+        if entry is None:
+            return None
+        server_type = entry.options.get(
+            CONF_SERVER_TYPE, entry.data.get(CONF_SERVER_TYPE, "")
+        )
+        if server_type in {
+            SERVER_TYPE_OLLAMA,
+            SERVER_TYPE_ANTHROPIC,
+            SERVER_TYPE_HERMES,
+            SERVER_TYPE_OPENCLAW,
+        }:
+            return None
+        model = entry.options.get(
+            CONF_MODEL_NAME, entry.data.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME)
+        )
+        if not model:
+            return None
+        api_key = entry.options.get(
+            CONF_API_KEY, entry.data.get(CONF_API_KEY, DEFAULT_API_KEY)
+        ) or ""
+        if server_type == SERVER_TYPE_GEMINI:
+            base_url = GEMINI_BASE_URL
+        elif server_type == SERVER_TYPE_OPENROUTER:
+            base_url = OPENROUTER_BASE_URL
+        elif server_type == SERVER_TYPE_OPENAI:
+            base_url = entry.options.get(
+                CONF_LMSTUDIO_URL, entry.data.get(CONF_LMSTUDIO_URL, OPENAI_BASE_URL)
+            )
+        else:
+            base_url = entry.options.get(
+                CONF_LMSTUDIO_URL, entry.data.get(CONF_LMSTUDIO_URL, "")
+            )
+        if not base_url:
+            return None
+        return openai_chat_url(str(base_url)), str(api_key), str(model)
+
+    async def _llm_store_decision(
+        self, kind: str, new_text: str, candidates: list
+    ) -> dict[str, Any] | None:
+        """Ask for add/update/noop. None means do not store."""
+        target = self._chat_decision_target()
+        if target is None or not candidates:
+            return None
+        url, api_key, model = target
+        prompt = format_store_decision_prompt(kind, new_text, candidates)
+        raw = await complete_store_decision(
+            url=url, api_key=api_key, model=model, prompt=prompt
+        )
+        if not raw:
+            return None
+        allowed = {str(item.get("id")) for item in candidates if item.get("id")}
+        decision = parse_llm_store_decision(raw, allowed)
+        if decision is None:
+            _LOGGER.warning("Store decision was not usable JSON")
+        return decision
+
+    async def _plan_store_call(
+        self,
+        *,
+        kind: str,
+        mode: str | None,
+        new_text: str,
+        items: list,
+        requested_id: str | None,
+        conversation_id: str | None,
+    ) -> dict[str, Any]:
+        """Score locally, then spend one short model call only when still ambiguous."""
+        exact = find_exact_text(items, new_text)
+        if exact is not None:
+            _LOGGER.info("Store decision for %s: noop (exact)", kind)
+            return {
+                "action": "noop",
+                "reason": "exact",
+                "target_id": exact.get("id"),
+                "target": exact,
+                "candidates": [],
+            }
+        if mode == "noop":
+            _LOGGER.info("Store decision for %s: noop (mode)", kind)
+            return {
+                "action": "noop",
+                "reason": "mode",
+                "target_id": None,
+                "target": None,
+                "candidates": [],
+            }
+        settings = read_memory_settings(self.hass)
+        similarities = await self._score_items(new_text, items)
+        guard = self._store_guard(conversation_id)
+        token = f"{kind}:{memory_compare_key(new_text)}"
+        shown = token in guard["shown"]
+        failed = token in guard["failed"]
+        preview = plan_store(
+            mode=mode,
+            new_text=new_text,
+            items=items,
+            similarities=similarities,
+            requested_id=requested_id,
+            candidate_threshold=settings.candidate_threshold,
+            near_copy_threshold=settings.auto_merge_threshold,
+            candidates_shown=shown,
+            failed_update=failed,
+        )
+        needs_model = (
+            preview["action"] == "candidates"
+            and bool(preview["candidates"])
+            and mode != "add"
+            and not failed
+        )
+        decision = None
+        if needs_model:
+            decision = await self._llm_store_decision(
+                kind, new_text, preview["candidates"]
+            )
+        plan = preview
+        if decision is not None:
+            plan = plan_store(
+                mode=mode,
+                new_text=new_text,
+                items=items,
+                similarities=similarities,
+                requested_id=requested_id,
+                candidate_threshold=settings.candidate_threshold,
+                near_copy_threshold=settings.auto_merge_threshold,
+                candidates_shown=shown,
+                failed_update=failed,
+                llm=decision,
+            )
+        if plan["action"] == "candidates":
+            guard["shown"].add(token)
+            if plan["reason"] == "unknown_id":
+                guard["failed"].add(token)
+        elif token in guard["failed"]:
+            guard["failed"].discard(token)
+        _LOGGER.info(
+            "Store decision for %s: %s (%s)", kind, plan["action"], plan["reason"]
+        )
+        return plan
+
+    def _candidates_result(self, kind: str, new_text: str, candidates: list) -> Dict[str, Any]:
+        """Return real ids and store nothing."""
+        if not candidates:
+            id_field = "memory_id" if kind == "memory" else "instruction_id"
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"NOT STORED. No {kind} with that id. "
+                            f"Nothing was written. Copy {id_field} from an existing row. "
+                            "A category name is not an id."
+                        ),
+                    }
+                ],
+                "stored": False,
+                "isError": True,
+            }
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": format_similarity_decision(kind, new_text, candidates),
+                }
+            ],
+            "stored": False,
+            "candidates": [
+                {
+                    "id": item.get("id"),
+                    "text": item.get("text"),
+                    "category": item.get("category"),
+                    "score": item.get("score"),
+                }
+                for item in candidates
+            ],
+        }
+
+    def _noop_result(self, kind: str, plan: dict[str, Any]) -> Dict[str, Any]:
+        target = plan.get("target") or {}
+        if not target:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "NOOP. Nothing was stored. The fact was already known.",
+                    }
+                ],
+                "stored": False,
+            }
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": format_noop_result(kind, target, plan.get("reason") or ""),
+                }
+            ],
+            "stored": False,
+            kind: target,
+        }
+
+    async def tool_remember_memory(
+        self, args: Dict[str, Any], context: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
         """Store a persisted memory (kept until explicitly forgotten)."""
         memory_text = " ".join(str(args.get("memory") or "").split()).strip()
         if not memory_text:
@@ -360,102 +598,53 @@ class MCPServer:
             tool="remember_memory",
         )
 
+        conversation_id = (
+            context.get("conversation_id") if isinstance(context, dict) else None
+        )
         try:
-            if mode == "noop":
+            if mode == "update" and not memory_id:
                 return {
                     "content": [
                         {
                             "type": "text",
-                            "text": "NOOP. Nothing was stored. The fact was already known.",
+                            "text": (
+                                "NOT STORED. mode=update requires memory_id. "
+                                "Nothing was written. Copy a real id. A category is not an id."
+                            ),
                         }
                     ],
+                    "isError": True,
                     "stored": False,
                 }
-            if mode == "update":
-                if not memory_id:
-                    return {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": (
-                                    "NOT STORED. mode=update requires memory_id. "
-                                    "Nothing was written."
-                                ),
-                            }
-                        ],
-                        "isError": True,
-                    }
-                current = await self._memory().async_list_raw()
-                previous = next(
-                    (item for item in current if str(item.get("id")) == memory_id),
-                    None,
+            existing = await self._memory().async_list_raw()
+            plan = await self._plan_store_call(
+                kind="memory",
+                mode=mode,
+                new_text=memory_text,
+                items=existing,
+                requested_id=memory_id or None,
+                conversation_id=None if conversation_id is None else str(conversation_id),
+            )
+            if plan["action"] == "noop":
+                return self._noop_result("memory", plan)
+            if plan["action"] == "candidates":
+                return self._candidates_result(
+                    "memory", memory_text, plan["candidates"]
                 )
-                if previous is None:
-                    return {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": (
-                                    f"NOT STORED. No memory with id {memory_id}. "
-                                    "Nothing was written."
-                                ),
-                            }
-                        ],
-                        "isError": True,
-                    }
+            if plan["action"] == "update":
+                target_id = str(plan["target_id"])
+                previous = next(
+                    (item for item in existing if str(item.get("id")) == target_id),
+                    plan.get("target") or {},
+                )
                 stored = await self._memory().async_replace(
-                    memory_id,
+                    target_id,
                     memory_text,
                     category=category_text or None,
                     set_category=bool(category_text),
                 )
                 replaced_text = str(previous.get("text") or "")
             else:
-                existing = await self._memory().async_list_raw()
-                if mode is None:
-                    exact = find_exact_text(existing, memory_text)
-                    if exact is not None:
-                        return {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": (
-                                        f"NOOP. Already stored as [{exact['id']}]: {exact['text']}. "
-                                        "Nothing was changed."
-                                    ),
-                                }
-                            ],
-                            "stored": False,
-                            "memory": exact,
-                        }
-                    settings = read_memory_settings(self.hass)
-                    similarities = await self._score_items(memory_text, existing)
-                    candidates = select_similar_candidates(
-                        existing,
-                        memory_text,
-                        similarities,
-                        settings.candidate_threshold,
-                    )
-                    if candidates:
-                        return {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": format_similarity_decision(
-                                        "memory", memory_text, candidates
-                                    ),
-                                }
-                            ],
-                            "stored": False,
-                            "candidates": [
-                                {
-                                    "id": item.get("id"),
-                                    "text": item.get("text"),
-                                    "score": item.get("score"),
-                                }
-                                for item in candidates
-                            ],
-                        }
                 stored = await self._memory().remember(
                     memory_text,
                     category=category,
@@ -730,7 +919,7 @@ class MCPServer:
         }
 
     async def tool_set_personality_instruction(
-        self, args: Dict[str, Any]
+        self, args: Dict[str, Any], context: Dict[str, Any] | None = None
     ) -> Dict[str, Any]:
         """Add or replace one personality instruction."""
         text = " ".join(str(args.get("instruction") or "").split()).strip()
@@ -749,17 +938,10 @@ class MCPServer:
             }
         if mode is None and instruction_id_text:
             mode = "update"
+        conversation_id = (
+            context.get("conversation_id") if isinstance(context, dict) else None
+        )
         try:
-            if mode == "noop":
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "NOOP. The personality block was not changed.",
-                        }
-                    ],
-                    "stored": False,
-                }
             if mode == "update" and not instruction_id_text:
                 return {
                     "content": [
@@ -772,49 +954,24 @@ class MCPServer:
                         }
                     ],
                     "isError": True,
+                    "stored": False,
                 }
-            if mode is None and text:
-                existing = await self._personality().async_view()
-                exact = find_exact_text(existing, text)
-                if exact is not None:
-                    return {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": (
-                                    f"NOOP. Personality instruction [{exact['id']}] is already stored. "
-                                    "Nothing was changed."
-                                ),
-                            }
-                        ],
-                        "stored": False,
-                    }
-                similarities = await self._score_items(text, existing)
-                candidates = select_similar_candidates(
-                    existing,
-                    text,
-                    similarities,
-                    read_memory_settings(self.hass).candidate_threshold,
-                )
-                if candidates:
-                    return {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": format_similarity_decision(
-                                    "personality", text, candidates
-                                ),
-                            }
-                        ],
-                        "stored": False,
-                        "candidates": [
-                            {"id": item.get("id"), "text": item.get("text"), "score": item.get("score")}
-                            for item in candidates
-                        ],
-                    }
+            existing = await self._personality().async_view()
+            plan = await self._plan_store_call(
+                kind="personality",
+                mode=mode,
+                new_text=text,
+                items=existing,
+                requested_id=instruction_id_text,
+                conversation_id=None if conversation_id is None else str(conversation_id),
+            )
+            if plan["action"] == "noop":
+                return self._noop_result("personality", plan)
+            if plan["action"] == "candidates":
+                return self._candidates_result("personality", text, plan["candidates"])
             result = await self._personality().async_set(
                 text,
-                instruction_id=instruction_id_text if mode == "update" else None,
+                instruction_id=str(plan["target_id"]) if plan["action"] == "update" else None,
             )
         except Exception as err:
             _LOGGER.error("Failed to update personality: %s", err)
@@ -1511,7 +1668,7 @@ class MCPServer:
             },
             {
                 "name": "set_personality_instruction",
-                "description": "Add a speaking-style, persona, tone, or form-of-address instruction. If similar instructions already exist, the first call stores nothing and lists them. Call again with mode=add (different instruction), mode=update plus instruction_id and the merged wording (same instruction), or mode=noop (already known). Do not update a different instruction. Use this for 'talk to me like a pirate' or 'говори со мной как пират'. Do not store those with remember_memory.",
+                "description": "Add a speaking-style, persona, tone, or form-of-address instruction. Call it once with the instruction only. The server adds it, updates the same instruction, or reports that it is already stored. Do not pass mode or invent an instruction_id. Use this for 'talk to me like a pirate' or 'говори со мной как пират'. Do not store those with remember_memory.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1522,12 +1679,12 @@ class MCPServer:
                         },
                         "instruction_id": {
                             "type": "string",
-                            "description": "Existing instruction id. Required with mode=update. Passing it without mode replaces that instruction.",
+                            "description": "Omit this. A real instruction id copied from a tool result. A category name is not an id.",
                         },
                         "mode": {
                             "type": "string",
                             "enum": ["add", "update", "noop"],
-                            "description": "Omit on the first call. After similar instructions are listed, set add, update, or noop.",
+                            "description": "Omit this. The server decides. mode=add does not bypass duplicate checks.",
                         },
                     },
                     "required": ["instruction"],
@@ -1875,7 +2032,7 @@ class MCPServer:
                 [
                     {
                         "name": "remember_memory",
-                        "description": "Store a fact or preference. If similar memories already exist, the first call stores nothing and lists their ids. Call again with mode=add when it is a different fact, mode=update plus memory_id and a merged wording when it is the same fact, or mode=noop when it is already known. Do not update a different fact: 'Олега зовут хозяином' does not replace 'Меня зовут Олег'. Use this only when the user explicitly asks you to remember something. Do not use it for speaking style; use set_personality_instruction for that.",
+                        "description": "Store a fact or preference. Call it once with the fact only. The server stores a new row, updates the same fact, or reports that it is already stored. Do not pass mode or memory_id. Do not invent an id or pass a category as an id. 'Олега зовут хозяином' does not replace 'Меня зовут Олег'. Use this only when the user explicitly asks you to remember something. Do not use it for speaking style; use set_personality_instruction for that.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1891,11 +2048,11 @@ class MCPServer:
                                 "mode": {
                                     "type": "string",
                                     "enum": ["add", "update", "noop"],
-                                    "description": "Omit on the first call. After candidates are returned, set add, update, or noop. update rewrites the memory_id you choose.",
+                                    "description": "Omit this. The server decides. mode=add does not bypass duplicate checks. After a rejected update it stores nothing.",
                                 },
                                 "memory_id": {
                                     "type": "string",
-                                    "description": "Required with mode=update. The existing memory to rewrite. Never invent an id.",
+                                    "description": "Omit this. A real memory id, copied from a tool result. A category name is not an id.",
                                 },
                             },
                             "required": ["memory"],
@@ -2017,7 +2174,7 @@ class MCPServer:
         elif tool_name == "run_automation":
             return await self.tool_run_automation(arguments)
         elif tool_name == "remember_memory":
-            return await self.tool_remember_memory(arguments)
+            return await self.tool_remember_memory(arguments, context)
         elif tool_name == "recall_memories":
             return await self.tool_recall_memories(arguments)
         elif tool_name == "forget_memory":
@@ -2027,7 +2184,7 @@ class MCPServer:
         elif tool_name == "view_personality":
             return await self.tool_view_personality(arguments)
         elif tool_name == "set_personality_instruction":
-            return await self.tool_set_personality_instruction(arguments)
+            return await self.tool_set_personality_instruction(arguments, context)
         elif tool_name == "remove_personality_instruction":
             return await self.tool_remove_personality_instruction(arguments)
         elif tool_name == "reset_personality":
