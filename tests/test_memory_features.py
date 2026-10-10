@@ -45,7 +45,9 @@ from mcp_assist_se.memory_rank import (
     public_memory,
     rank_by_cosine,
     rank_memories,
-    select_duplicate,
+    format_similarity_decision,
+    parse_store_mode,
+    select_similar_candidates,
     select_forget_matches,
     stem_token,
     validate_personality_text,
@@ -222,7 +224,8 @@ class EmbeddingHelperTests(unittest.TestCase):
         self.assertEqual(normalized["local_embedding_model"], "sergeyzh/rubert-tiny-turbo")
         self.assertEqual(normalized["embedding_provider"], "local")
         self.assertEqual(normalized["memory_top_k"], 4)
-        self.assertEqual(normalized["memory_dedupe_threshold"], 0.80)
+        self.assertEqual(normalized["memory_candidate_threshold"], 0.65)
+        self.assertEqual(normalized["memory_auto_merge_threshold"], 0.91)
         self.assertEqual(normalized["memory_forget_threshold"], 0.80)
         clamped = normalize_memory_options(
             {
@@ -382,7 +385,7 @@ class ForgetAndDedupeTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in one], ["flag"])
         self.assertIn("DELETED NOTHING", format_forget_result([], [], searched_personality=True, searched_memories=True))
 
-    def test_remember_replaces_the_same_subject(self) -> None:
+    def test_similar_candidates_do_not_choose_a_replacement(self) -> None:
         items = [
             {
                 "id": "name",
@@ -391,58 +394,97 @@ class ForgetAndDedupeTests(unittest.TestCase):
                 "created_at": "2024-01-01T00:00:00+00:00",
             },
             {
+                "id": "title",
+                "text": "Олега зовут хозяином",
+                "category": None,
+                "created_at": "2024-02-01T00:00:00+00:00",
+            },
+            {
                 "id": "light",
                 "text": "Яркий белый свет: 100%, 2000К",
                 "category": "light",
                 "created_at": "2024-01-02T00:00:00+00:00",
             },
+            {
+                "id": "door",
+                "text": "Дверь спальни закрыта.",
+                "category": None,
+                "created_at": "2024-03-01T00:00:00+00:00",
+            },
         ]
-        name = select_duplicate(
+        scores = {"name": 0.92, "title": 0.90, "light": 0.60, "door": 0.63}
+        candidates = select_similar_candidates(
             items,
             "Пользователя зовут Олег.",
-            None,
-            {"name": 0.92, "light": 0.60},
-            0.80,
+            scores,
+            0.65,
         )
-        self.assertIsNotNone(name)
-        assert name is not None
-        self.assertEqual(name["id"], "name")
-        light = select_duplicate(
-            items,
-            "Яркий белый свет для ленты в гостиной: яркость 255, 2000K",
-            "light",
-            {"name": 0.58, "light": 0.82},
-            0.80,
+        self.assertEqual([item["id"] for item in candidates], ["name", "title"])
+        self.assertNotIn("light", {item["id"] for item in candidates})
+        decision = format_similarity_decision(
+            "memory", "Пользователя зовут Олег.", candidates
         )
-        self.assertIsNotNone(light)
-        assert light is not None
-        self.assertEqual(light["id"], "light")
-        other_category = select_duplicate(
-            items,
-            "Яркий белый свет: 50%",
-            "kitchen",
-            {"light": 0.90},
-            0.80,
-        )
-        self.assertIsNone(other_category)
-        below = select_duplicate(
+        self.assertIn("NOT STORED", decision)
+        self.assertIn("mode=add", decision)
+        self.assertIn("mode=update", decision)
+        self.assertIn("mode=noop", decision)
+        self.assertIn("хозяином", decision)
+        self.assertEqual(parse_store_mode(None), None)
+        self.assertEqual(parse_store_mode("UPDATE"), "update")
+        self.assertEqual(parse_store_mode("nope"), "invalid")
+        # A scored row under the candidate line is not promoted by stem overlap.
+        hidden = select_similar_candidates(
             items,
             "Пользователя зовут Олег.",
-            None,
             {"name": 0.50},
-            0.80,
+            0.65,
         )
-        self.assertIsNone(below)
-        stemmed = select_duplicate(
-            items,
-            "Пользователя зовут Олег.",
-            None,
-            None,
-            0.80,
-        )
-        self.assertIsNotNone(stemmed)
-        assert stemmed is not None
-        self.assertEqual(stemmed["id"], "name")
+        self.assertEqual(hidden, [])
+
+    def test_automatic_merge_stays_above_different_facts(self) -> None:
+        items = [
+            {
+                "id": "old-name",
+                "text": "Меня зовут Олег",
+                "category": None,
+                "created_at": "2024-01-01T00:00:00+00:00",
+            },
+            {
+                "id": "new-name",
+                "text": "Пользователя зовут Олег.",
+                "category": None,
+                "created_at": "2024-06-01T00:00:00+00:00",
+            },
+            {
+                "id": "title",
+                "text": "Олега зовут хозяином",
+                "category": None,
+                "created_at": "2024-07-01T00:00:00+00:00",
+            },
+            {
+                "id": "old-light",
+                "text": "Яркий белый свет: 100%, 2000К",
+                "category": None,
+                "created_at": "2024-01-02T00:00:00+00:00",
+            },
+            {
+                "id": "new-light",
+                "text": "Яркий белый свет для ленты в гостиной: яркость 255",
+                "category": None,
+                "created_at": "2024-08-01T00:00:00+00:00",
+            },
+        ]
+        matrix = {
+            "old-name": {"new-name": 0.92, "title": 0.90, "old-light": 0.60, "new-light": 0.58},
+            "new-name": {"old-name": 0.92, "title": 0.90, "old-light": 0.60, "new-light": 0.58},
+            "title": {"old-name": 0.90, "new-name": 0.90, "old-light": 0.55, "new-light": 0.55},
+            "old-light": {"new-light": 0.82, "old-name": 0.60, "new-name": 0.60, "title": 0.55},
+            "new-light": {"old-light": 0.82, "old-name": 0.58, "new-name": 0.58, "title": 0.55},
+        }
+        groups = plan_duplicate_merges(items, matrix, 0.91)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["keep"]["id"], "new-name")
+        self.assertEqual([item["id"] for item in groups[0]["remove"]], ["old-name"])
 
     def test_merge_keeps_the_newest_text(self) -> None:
         items = [

@@ -253,12 +253,16 @@ CONF_MEMORY_SIMILARITY_THRESHOLD = "memory_similarity_threshold"
 # 0.83-0.95 and unrelated ones around 0.60-0.74. Raise it if the wrong
 # fact is injected. multilingual-e5-small may need a different value.
 DEFAULT_MEMORY_SIMILARITY_THRESHOLD = 0.78
-# Same-subject replacement. Measured on rubert-tiny-turbo:
-# "Меня зовут Олег" vs "Пользователя зовут Олег." = 0.92,
-# the two "яркий белый свет" value variants = 0.82,
-# unrelated stored facts about 0.60-0.70.
-CONF_MEMORY_DEDUPE_THRESHOLD = "memory_dedupe_threshold"
-DEFAULT_MEMORY_DEDUPE_THRESHOLD = 0.80
+# Shown to the model as possible duplicates. It decides add, update, or noop.
+# 0.65 is below the unrelated band on rubert-tiny-turbo (~0.60-0.70) enough to
+# surface "Олега зовут хозяином" (0.90) next to the name fact without writing it.
+CONF_MEMORY_CANDIDATE_THRESHOLD = "memory_candidate_threshold"
+DEFAULT_MEMORY_CANDIDATE_THRESHOLD = 0.65
+# One-time and explicit cleanup only. Name paraphrases score 0.92.
+# "Олега зовут хозяином" vs the name fact scores 0.90 and must not be merged.
+# The two bright-white-light values score 0.82 and wait for the model.
+CONF_MEMORY_AUTO_MERGE_THRESHOLD = "memory_auto_merge_threshold"
+DEFAULT_MEMORY_AUTO_MERGE_THRESHOLD = 0.91
 # Semantic forget. "забудь всё про пиратов" vs "разговаривать как пират" = 0.81.
 # Inflection also matches by stem below this score.
 CONF_MEMORY_FORGET_THRESHOLD = "memory_forget_threshold"
@@ -286,7 +290,7 @@ Memory tools are enabled.
 - When the user says to forget everything about a subject ("забудь всё про ...", "forget everything about ..."), set forget_all_matches to true.
 - forget_memory also searches the personality block when you do not have an id. If a style lives there, it is removed too.
 - If the tool says DELETED NOTHING, tell the user that nothing was removed. Do not claim you forgot it.
-- remember_memory updates an existing memory about the same subject instead of storing a near-duplicate. The new wording wins.
+- If remember_memory says NOT STORED and lists similar memories, nothing was written. Call it again with mode=add (different fact), mode=update plus memory_id and a merged wording (same fact), or mode=noop (already known). Never update a different fact. "Олега зовут хозяином" is not the same fact as "Меня зовут Олег".
 - Memories persist until the user explicitly asks to forget them. There is no automatic expiry.
 """
 
@@ -296,7 +300,7 @@ Personality tools are enabled.
 - Use view_personality to read it, set_personality_instruction to add or replace one instruction, remove_personality_instruction to delete one, and reset_personality to clear it.
 - A request such as "talk to me like a pirate" or "говори со мной как пират" updates the personality block. It is not a memory.
 - If the user says to forget or stop a speaking style, call remove_personality_instruction. When you are not sure which store holds it, that tool also searches memories.
-- A new instruction about the same style replaces the existing one instead of adding a second copy.
+- If set_personality_instruction says NOT STORED and lists similar instructions, call it again with mode=add, mode=update plus instruction_id and the merged wording, or mode=noop. Do not replace a different instruction.
 - If the user replaces a style, replace the existing instruction or reset the block. Do not keep contradictory styles.
 - If the tool says nothing was removed, do not tell the user that you forgot it.
 """

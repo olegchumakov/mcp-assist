@@ -37,11 +37,14 @@ from .const import (
     DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
 )
 from .memory_rank import (
+    find_exact_text,
     format_forget_result,
     format_remember_result,
+    format_similarity_decision,
     looks_like_personality_request,
-    select_duplicate,
+    parse_store_mode,
     select_forget_matches,
+    select_similar_candidates,
 )
 from .memory_settings import read_memory_settings
 from .runtime import get_assist_runtime
@@ -334,6 +337,23 @@ class MCPServer:
                 ],
             }
 
+        mode = parse_store_mode(args.get("mode"))
+        if mode == "invalid":
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "NOT STORED. mode must be add, update, or noop. "
+                            "Nothing was written."
+                        ),
+                    }
+                ],
+                "isError": True,
+            }
+        memory_id = str(args.get("memory_id") or "").strip()
+        category_text = str(category).strip() if category is not None else ""
+
         self.publish_progress(
             "tool_start",
             "Storing memory",
@@ -341,31 +361,106 @@ class MCPServer:
         )
 
         try:
-            settings = read_memory_settings(self.hass)
-            existing = await self._memory().async_list_raw()
-            similarities = await self._score_items(memory_text, existing)
-            category_text = str(category).strip() if category is not None else ""
-            duplicate = select_duplicate(
-                existing,
-                memory_text,
-                category_text or None,
-                similarities,
-                settings.dedupe_threshold,
-            )
-            replaced_text = None
-            if duplicate:
-                replaced_text = str(duplicate.get("text") or "")
+            if mode == "noop":
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "NOOP. Nothing was stored. The fact was already known.",
+                        }
+                    ],
+                    "stored": False,
+                }
+            if mode == "update":
+                if not memory_id:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "NOT STORED. mode=update requires memory_id. "
+                                    "Nothing was written."
+                                ),
+                            }
+                        ],
+                        "isError": True,
+                    }
+                current = await self._memory().async_list_raw()
+                previous = next(
+                    (item for item in current if str(item.get("id")) == memory_id),
+                    None,
+                )
+                if previous is None:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"NOT STORED. No memory with id {memory_id}. "
+                                    "Nothing was written."
+                                ),
+                            }
+                        ],
+                        "isError": True,
+                    }
                 stored = await self._memory().async_replace(
-                    str(duplicate["id"]),
+                    memory_id,
                     memory_text,
                     category=category_text or None,
                     set_category=bool(category_text),
                 )
+                replaced_text = str(previous.get("text") or "")
             else:
+                existing = await self._memory().async_list_raw()
+                if mode is None:
+                    exact = find_exact_text(existing, memory_text)
+                    if exact is not None:
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        f"NOOP. Already stored as [{exact['id']}]: {exact['text']}. "
+                                        "Nothing was changed."
+                                    ),
+                                }
+                            ],
+                            "stored": False,
+                            "memory": exact,
+                        }
+                    settings = read_memory_settings(self.hass)
+                    similarities = await self._score_items(memory_text, existing)
+                    candidates = select_similar_candidates(
+                        existing,
+                        memory_text,
+                        similarities,
+                        settings.candidate_threshold,
+                    )
+                    if candidates:
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": format_similarity_decision(
+                                        "memory", memory_text, candidates
+                                    ),
+                                }
+                            ],
+                            "stored": False,
+                            "candidates": [
+                                {
+                                    "id": item.get("id"),
+                                    "text": item.get("text"),
+                                    "score": item.get("score"),
+                                }
+                                for item in candidates
+                            ],
+                        }
                 stored = await self._memory().remember(
                     memory_text,
                     category=category,
                 )
+                replaced_text = None
         except Exception as err:
             _LOGGER.error("Failed to store memory: %s", err)
             return {
@@ -394,7 +489,7 @@ class MCPServer:
                 }
             ],
             "memory": stored,
-            "replaced_duplicate": bool(replaced_text),
+            "stored": True,
         }
 
     async def tool_recall_memories(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -641,22 +736,85 @@ class MCPServer:
         text = " ".join(str(args.get("instruction") or "").split()).strip()
         instruction_id = args.get("instruction_id")
         instruction_id_text = None if instruction_id is None else str(instruction_id).strip()
+        mode = parse_store_mode(args.get("mode"))
+        if mode == "invalid":
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "NOT STORED. mode must be add, update, or noop. Nothing was written.",
+                    }
+                ],
+                "isError": True,
+            }
+        if mode is None and instruction_id_text:
+            mode = "update"
         try:
-            if text and not instruction_id_text:
+            if mode == "noop":
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "NOOP. The personality block was not changed.",
+                        }
+                    ],
+                    "stored": False,
+                }
+            if mode == "update" and not instruction_id_text:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "NOT STORED. mode=update requires instruction_id. "
+                                "Nothing was written."
+                            ),
+                        }
+                    ],
+                    "isError": True,
+                }
+            if mode is None and text:
                 existing = await self._personality().async_view()
+                exact = find_exact_text(existing, text)
+                if exact is not None:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"NOOP. Personality instruction [{exact['id']}] is already stored. "
+                                    "Nothing was changed."
+                                ),
+                            }
+                        ],
+                        "stored": False,
+                    }
                 similarities = await self._score_items(text, existing)
-                duplicate = select_duplicate(
+                candidates = select_similar_candidates(
                     existing,
                     text,
-                    None,
                     similarities,
-                    read_memory_settings(self.hass).dedupe_threshold,
+                    read_memory_settings(self.hass).candidate_threshold,
                 )
-                if duplicate:
-                    instruction_id_text = str(duplicate["id"])
+                if candidates:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": format_similarity_decision(
+                                    "personality", text, candidates
+                                ),
+                            }
+                        ],
+                        "stored": False,
+                        "candidates": [
+                            {"id": item.get("id"), "text": item.get("text"), "score": item.get("score")}
+                            for item in candidates
+                        ],
+                    }
             result = await self._personality().async_set(
                 text,
-                instruction_id=instruction_id_text,
+                instruction_id=instruction_id_text if mode == "update" else None,
             )
         except Exception as err:
             _LOGGER.error("Failed to update personality: %s", err)
@@ -1353,7 +1511,7 @@ class MCPServer:
             },
             {
                 "name": "set_personality_instruction",
-                "description": "Add a speaking-style, persona, tone, or form-of-address instruction, or replace one when instruction_id is set. If a stored instruction is about the same style, this updates that instruction instead of adding a duplicate. Use this for requests like 'talk to me like a pirate' or 'говори со мной как пират'. Do not store those with remember_memory. The instruction applies on later turns and should also be followed in this reply.",
+                "description": "Add a speaking-style, persona, tone, or form-of-address instruction. If similar instructions already exist, the first call stores nothing and lists them. Call again with mode=add (different instruction), mode=update plus instruction_id and the merged wording (same instruction), or mode=noop (already known). Do not update a different instruction. Use this for 'talk to me like a pirate' or 'говори со мной как пират'. Do not store those with remember_memory.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1364,7 +1522,12 @@ class MCPServer:
                         },
                         "instruction_id": {
                             "type": "string",
-                            "description": "Existing instruction id to replace. Omit to add a new instruction.",
+                            "description": "Existing instruction id. Required with mode=update. Passing it without mode replaces that instruction.",
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["add", "update", "noop"],
+                            "description": "Omit on the first call. After similar instructions are listed, set add, update, or noop.",
                         },
                     },
                     "required": ["instruction"],
@@ -1712,7 +1875,7 @@ class MCPServer:
                 [
                     {
                         "name": "remember_memory",
-                        "description": "Store a fact or preference for later recall. If a stored memory is already about the same subject, that memory is updated in place and a second copy is not added. Use this only when the user explicitly asks you to remember something about people, the home, devices, schedules, or favourites. Do not use it for speaking style or persona; use set_personality_instruction for that. Memories persist until the user asks you to forget them.",
+                        "description": "Store a fact or preference. If similar memories already exist, the first call stores nothing and lists their ids. Call again with mode=add when it is a different fact, mode=update plus memory_id and a merged wording when it is the same fact, or mode=noop when it is already known. Do not update a different fact: 'Олега зовут хозяином' does not replace 'Меня зовут Олег'. Use this only when the user explicitly asks you to remember something. Do not use it for speaking style; use set_personality_instruction for that.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1724,6 +1887,15 @@ class MCPServer:
                                 "category": {
                                     "type": "string",
                                     "description": "Optional short category such as 'preference', 'household', or 'schedule'.",
+                                },
+                                "mode": {
+                                    "type": "string",
+                                    "enum": ["add", "update", "noop"],
+                                    "description": "Omit on the first call. After candidates are returned, set add, update, or noop. update rewrites the memory_id you choose.",
+                                },
+                                "memory_id": {
+                                    "type": "string",
+                                    "description": "Required with mode=update. The existing memory to rewrite. Never invent an id.",
                                 },
                             },
                             "required": ["memory"],
@@ -1788,7 +1960,7 @@ class MCPServer:
                     },
                     {
                         "name": "merge_duplicate_memories",
-                        "description": "Merge near-duplicate memories and personality instructions into the newest entry of each group. Use when the user asks to clean up duplicate memories. Older wording is removed only when it is about the same subject. The result lists every removed line and the text that was kept.",
+                        "description": "Merge only near-identical memories and personality instructions (automatic merge threshold, default 0.91) into the newest entry of each group. Related but different facts are left untouched. Use remember_memory mode=update when you decide two related facts should become one. The result lists every removed line.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",

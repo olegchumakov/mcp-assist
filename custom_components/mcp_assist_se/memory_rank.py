@@ -399,38 +399,97 @@ def select_forget_matches(
     return [dict(row[3]) for row in chosen_rows]
 
 
-def select_duplicate(
+SIMILAR_CANDIDATE_LIMIT = 4
+_STORE_MODES = {"add", "update", "noop"}
+
+
+def parse_store_mode(value: Any) -> str | None:
+    """Return add, update, noop, invalid, or None when the model has not chosen yet."""
+    if value is None:
+        return None
+    text = str(value).strip().casefold()
+    if not text:
+        return None
+    if text in _STORE_MODES:
+        return text
+    return "invalid"
+
+
+def find_exact_text(items: list[dict[str, Any]], text: str) -> dict[str, Any] | None:
+    """Return the stored row whose text matches exactly, ignoring case."""
+    folded = (normalize_text(text) or "").casefold()
+    if not folded:
+        return None
+    for item in items:
+        if (normalize_text(item.get("text")) or "").casefold() == folded:
+            return dict(item)
+    return None
+
+
+def select_similar_candidates(
     items: list[dict[str, Any]],
     new_text: str,
-    new_category: str | None,
     similarities: dict[str, float] | None,
     threshold: float,
-) -> dict[str, Any] | None:
-    """Pick the existing row a new fact should replace, if it is the same subject.
+    *,
+    limit: int = SIMILAR_CANDIDATE_LIMIT,
+) -> list[dict[str, Any]]:
+    """Return the closest existing rows for the model to accept, merge, or ignore.
 
-    When ``new_category`` is set, only a row with that same category qualifies.
-    A scored row below ``threshold`` is not a duplicate. Rows without a score
-    can still match by stem overlap, which covers the period before the model loads.
+    A score at or above ``threshold`` is a candidate. It is not a decision to
+    overwrite. When no scores are available, stem overlap is listed instead so
+    a cold model still sees a near-copy. A scored row below ``threshold`` is
+    omitted even if the stems overlap.
     """
-    category = normalize_text(new_category)
-    best: tuple[float, str, dict[str, Any]] | None = None
+    ranked: list[tuple[float, str, dict[str, Any]]] = []
     for item in items:
-        if category and normalize_text(item.get("category")) != category:
-            continue
         item_id = str(item.get("id"))
         score: float | None = None
         if similarities is not None and item_id in similarities:
-            if float(similarities[item_id]) < threshold:
+            value = float(similarities[item_id])
+            if value < threshold:
                 continue
-            score = float(similarities[item_id])
-        elif texts_look_like_duplicates(new_text, str(item.get("text") or "")):
+            score = value
+        elif similarities is None and texts_look_like_duplicates(
+            new_text, str(item.get("text") or "")
+        ):
             score = threshold
         if score is None:
             continue
-        candidate = (score, _recency(item), item)
-        if best is None or candidate[:2] > best[:2]:
-            best = candidate
-    return dict(best[2]) if best else None
+        ranked.append((score, _recency(item), item))
+    ranked.sort(key=lambda row: (row[0], row[1]), reverse=True)
+    chosen: list[dict[str, Any]] = []
+    for score, _created, item in ranked[: max(1, limit)]:
+        copied = dict(item)
+        copied["score"] = round(score, 4)
+        chosen.append(copied)
+    return chosen
+
+
+def format_similarity_decision(
+    kind: str,
+    new_text: str,
+    candidates: list[dict[str, Any]],
+) -> str:
+    """Tell the model nothing was written and how to choose the next call."""
+    id_field = "memory_id" if kind == "memory" else "instruction_id"
+    lines = [
+        f"NOT STORED. Similar {kind} entries already exist. Nothing was written.",
+        "Call this tool again with one mode. Do not tell the user it was saved yet.",
+        "mode=add — this is a different fact. Store it as a new entry. Do not overwrite.",
+        f"mode=update plus {id_field}, and rewrite the text into one merged wording — only when it is the same fact.",
+        "mode=noop — the fact is already known. Store nothing.",
+        "A different fact must be mode=add. 'Олега зовут хозяином' does not replace 'Меня зовут Олег'.",
+        "Candidates:",
+    ]
+    for item in candidates:
+        score = item.get("score")
+        score_text = f"{float(score):.2f}" if isinstance(score, (int, float)) else "stem"
+        category = normalize_text(item.get("category"))
+        category_text = f" [{category}]" if category else ""
+        lines.append(f"- {item.get('id')}{category_text} ({score_text}): {item.get('text')}")
+    lines.append(f"New text: {new_text}")
+    return "\n".join(lines)
 
 
 def plan_duplicate_merges(
@@ -574,10 +633,10 @@ def format_remember_result(
     category_text = f" Category: {category}." if category else ""
     if replaced_text:
         return (
-            f"UPDATED memory [{stored.get('id')}] instead of adding a duplicate. "
+            f"UPDATED memory [{stored.get('id')}] with the merged text. "
             f"The previous text was: {replaced_text}. "
             f"The stored text is now: {stored.get('text')}.{category_text} "
-            "Tell the user you updated the existing memory."
+            "Tell the user you updated that existing memory."
         )
     return (
         f"Stored memory [{stored.get('id')}].{category_text} "

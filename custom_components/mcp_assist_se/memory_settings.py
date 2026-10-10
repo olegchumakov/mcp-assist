@@ -17,7 +17,8 @@ from .const import (
     CONF_ENABLE_PERSONALITY,
     CONF_LOCAL_EMBEDDING_MODEL,
     CONF_MEMORY_AUTO_RETRIEVE,
-    CONF_MEMORY_DEDUPE_THRESHOLD,
+    CONF_MEMORY_AUTO_MERGE_THRESHOLD,
+    CONF_MEMORY_CANDIDATE_THRESHOLD,
     CONF_MEMORY_FORGET_THRESHOLD,
     CONF_MEMORY_INCLUDE_LAST_TURN,
     CONF_MEMORY_SIMILARITY_THRESHOLD,
@@ -29,7 +30,8 @@ from .const import (
     DEFAULT_ENABLE_PERSONALITY,
     DEFAULT_LOCAL_EMBEDDING_MODEL,
     DEFAULT_MEMORY_AUTO_RETRIEVE,
-    DEFAULT_MEMORY_DEDUPE_THRESHOLD,
+    DEFAULT_MEMORY_AUTO_MERGE_THRESHOLD,
+    DEFAULT_MEMORY_CANDIDATE_THRESHOLD,
     DEFAULT_MEMORY_FORGET_THRESHOLD,
     DEFAULT_MEMORY_INCLUDE_LAST_TURN,
     DEFAULT_MEMORY_SIMILARITY_THRESHOLD,
@@ -79,8 +81,11 @@ def normalize_memory_options(user_input: dict[str, Any] | None) -> dict[str, Any
     except (TypeError, ValueError):
         threshold = DEFAULT_MEMORY_SIMILARITY_THRESHOLD
     threshold = max(0.0, min(1.0, threshold))
-    dedupe_threshold = _clamped_float(
-        source.get(CONF_MEMORY_DEDUPE_THRESHOLD), DEFAULT_MEMORY_DEDUPE_THRESHOLD
+    candidate_threshold = _clamped_float(
+        source.get(CONF_MEMORY_CANDIDATE_THRESHOLD), DEFAULT_MEMORY_CANDIDATE_THRESHOLD
+    )
+    auto_merge_threshold = _clamped_float(
+        source.get(CONF_MEMORY_AUTO_MERGE_THRESHOLD), DEFAULT_MEMORY_AUTO_MERGE_THRESHOLD
     )
     forget_threshold = _clamped_float(
         source.get(CONF_MEMORY_FORGET_THRESHOLD), DEFAULT_MEMORY_FORGET_THRESHOLD
@@ -100,7 +105,8 @@ def normalize_memory_options(user_input: dict[str, Any] | None) -> dict[str, Any
         ),
         CONF_MEMORY_TOP_K: top_k,
         CONF_MEMORY_SIMILARITY_THRESHOLD: threshold,
-        CONF_MEMORY_DEDUPE_THRESHOLD: dedupe_threshold,
+        CONF_MEMORY_CANDIDATE_THRESHOLD: candidate_threshold,
+        CONF_MEMORY_AUTO_MERGE_THRESHOLD: auto_merge_threshold,
         CONF_MEMORY_FORGET_THRESHOLD: forget_threshold,
         CONF_MEMORY_INCLUDE_LAST_TURN: as_bool(
             source.get(CONF_MEMORY_INCLUDE_LAST_TURN), DEFAULT_MEMORY_INCLUDE_LAST_TURN
@@ -123,7 +129,8 @@ class MemorySettings:
     auto_retrieve: bool
     top_k: int
     threshold: float
-    dedupe_threshold: float
+    candidate_threshold: float
+    auto_merge_threshold: float
     forget_threshold: float
     include_last_turn: bool
     provider: str
@@ -164,7 +171,8 @@ def read_memory_settings(hass) -> MemorySettings:
         auto_retrieve=normalized[CONF_MEMORY_AUTO_RETRIEVE],
         top_k=normalized[CONF_MEMORY_TOP_K],
         threshold=normalized[CONF_MEMORY_SIMILARITY_THRESHOLD],
-        dedupe_threshold=normalized[CONF_MEMORY_DEDUPE_THRESHOLD],
+        candidate_threshold=normalized[CONF_MEMORY_CANDIDATE_THRESHOLD],
+        auto_merge_threshold=normalized[CONF_MEMORY_AUTO_MERGE_THRESHOLD],
         forget_threshold=normalized[CONF_MEMORY_FORGET_THRESHOLD],
         include_last_turn=normalized[CONF_MEMORY_INCLUDE_LAST_TURN],
         provider=normalized[CONF_EMBEDDING_PROVIDER],

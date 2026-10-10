@@ -45,7 +45,7 @@ _BACKFILL_LIMIT = 16
 _DOWNLOAD_TIMEOUT_SECONDS = 180
 _OPENAI_TIMEOUT_SECONDS = 2.5
 _PREPARE_RETRY_SECONDS = 300
-_USER_AGENT = "mcp-assist-se/0.22.0"
+_USER_AGENT = "mcp-assist-se/0.22.2"
 
 
 @dataclass(frozen=True)
@@ -427,7 +427,7 @@ class EmbeddingService:
                 "personality_groups": [],
             }
         memory_groups = plan_duplicate_merges(
-            memories, memory_matrix, settings.dedupe_threshold
+            memories, memory_matrix, settings.auto_merge_threshold
         )
         for group in memory_groups:
             deleted = await self._memory.async_delete_ids(
@@ -457,7 +457,7 @@ class EmbeddingService:
                 )
             else:
                 personality_groups = plan_duplicate_merges(
-                    instructions, personality_matrix, settings.dedupe_threshold
+                    instructions, personality_matrix, settings.auto_merge_threshold
                 )
                 for group in personality_groups:
                     deleted = await personality.async_delete_ids(

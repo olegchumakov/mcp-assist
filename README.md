@@ -56,7 +56,7 @@ Instead of dumping all entities, MCP Assist:
 
 The Smart Entity Index provides a lightweight (~400-800 tokens) snapshot of your Home Assistant system structure, enabling context-aware queries without full entity dumps. The index includes areas, domains, device classes, people, calendars, zones, automations, and scripts. For entities without standardized device_class attributes (like custom integrations), LLM-powered gap-filling automatically infers semantic categories from naming patterns. This results in faster, more accurate queries that use ~95% fewer tokens compared to traditional entity dumps.
 
-## Memory and personality (v0.22.1+)
+## Memory and personality (v0.22.2+)
 
 Two additions for a voice assistant that should remember facts and keep a speaking style:
 
@@ -65,7 +65,7 @@ Two additions for a voice assistant that should remember facts and keep a speaki
 
 Embeddings are computed **on this Home Assistant** by default. Nothing is sent to an embedding API unless you switch the provider.
 
-The default model is [`sergeyzh/rubert-tiny-turbo`](https://huggingface.co/sergeyzh/rubert-tiny-turbo): a Russian sentence model, about 29M parameters, 312 dimensions, 3 layers. First run downloads **about 118 MB** into `/config/mcp_assist_se/models/` and then keeps **about 180 MB** of RAM while it is loaded. Loading is lazy and happens in a background thread, so the conversation is not blocked. Until the model is ready, retrieval falls back to the existing keyword ranker. Later turns use the cached vectors. Vectors are stored on each memory together with the model id, so changing the model recomputes them. Existing memories and settings are kept. After the model loads, near-duplicates at or above the duplicate threshold are merged into the newest wording, and each removed line is logged. Forgetting matches Russian word forms, so «пиратов» finds a memory that says «пират». A forget that matches nothing tells the model that nothing was deleted.
+The default model is [`sergeyzh/rubert-tiny-turbo`](https://huggingface.co/sergeyzh/rubert-tiny-turbo): a Russian sentence model, about 29M parameters, 312 dimensions, 3 layers. First run downloads **about 118 MB** into `/config/mcp_assist_se/models/` and then keeps **about 180 MB** of RAM while it is loaded. Loading is lazy and happens in a background thread, so the conversation is not blocked. Until the model is ready, retrieval falls back to the existing keyword ranker. Later turns use the cached vectors. Vectors are stored on each memory together with the model id, so changing the model recomputes them. Existing memories and settings are kept. Remembering a fact does not overwrite a similar one: the assistant is shown the closest existing rows and must choose add, update, or leave them. After the model loads, only near-identical copies (0.91 or higher) are merged automatically, and each removed line is logged. Forgetting matches Russian word forms, so «пиратов» finds a memory that says «пират». A forget that matches nothing tells the model that nothing was deleted.
 
 ONNX Runtime is not used. It has no musl wheels, and Home Assistant OS is Alpine, so it would fail to install. The integration runs the BERT network with NumPy plus the `tokenizers` and `safetensors` packages, which publish wheels for x86_64 and aarch64 on both musl and glibc. PyTorch is not installed.
 
@@ -294,7 +294,8 @@ Open the integration options, finish the shared MCP page, then open **Memory and
 | Retrieve relevant memories automatically | On | Leave on so facts are injected without a tool call. |
 | Memories to inject | 4 | Lower it if prompts get crowded. |
 | Similarity threshold | 0.78 | Tuned for rubert-tiny-turbo. Related phrases score about 0.83-0.95; unrelated ones about 0.60-0.74. Raise it if the wrong fact is injected. |
-| Duplicate threshold | 0.80 | A new fact at or above this replaces the existing memory about the same subject. Name paraphrases score about 0.92; the two bright-white-light values score about 0.82. |
+| Similar-memory candidates | 0.65 | Existing rows at or above this are shown to the assistant. Nothing is overwritten until it chooses update. |
+| Automatic merge threshold | 0.91 | One-time cleanup and the merge tool. Name paraphrases are about 0.92. A different fact at 0.90 is left alone. |
 | Forget threshold | 0.80 | Semantic forget. Inflected forms such as «пиратов» also match «пират» by stem. |
 | Include the previous user turn | On | Helps follow-ups such as "turn that on". |
 | Embedding provider | Local | Keep Local. Switch to OpenAI-compatible only if you want `/v1/embeddings`. |
