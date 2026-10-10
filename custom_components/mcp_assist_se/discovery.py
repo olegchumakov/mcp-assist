@@ -26,6 +26,7 @@ try:
 except ImportError:  # pragma: no cover - older Home Assistant versions
     lr = None
 
+from .action_verify import listing_disposition, prepare_listed_entity
 from .const import MAX_ENTITIES_PER_DISCOVERY
 from .ha_compat import devices_in_area
 
@@ -486,6 +487,8 @@ class SmartDiscovery:
                 pattern_regex = pattern.replace("{name}", re.escape(name_lower))
                 if re.match(pattern_regex, entity_id_lower):
                     entity_info = self._create_entity_info(state_obj, description)
+                    if entity_info is None:
+                        continue
 
                     if category == "primary":
                         results["primary_entities"].append(entity_info)
@@ -499,7 +502,8 @@ class SmartDiscovery:
                 # Check friendly name
                 if name_lower in state_obj.name.lower():
                     entity_info = self._create_entity_info(state_obj)
-                    results["related_entities"]["other"].append(entity_info)
+                    if entity_info is not None:
+                        results["related_entities"]["other"].append(entity_info)
                 else:
                     # Check entity aliases
                     entity_registry = er.async_get(self.hass)
@@ -509,6 +513,8 @@ class SmartDiscovery:
                         for alias in entity_aliases:
                             if name_lower in alias.lower():
                                 entity_info = self._create_entity_info(state_obj)
+                                if entity_info is None:
+                                    break
                                 entity_info["matched_alias"] = alias
                                 results["related_entities"]["other"].append(entity_info)
                                 break
@@ -548,6 +554,8 @@ class SmartDiscovery:
                 pattern_regex = pattern.replace("{name}", re.escape(name_lower))
                 if re.match(pattern_regex, entity_id_lower):
                     entity_info = self._create_entity_info(state_obj, description)
+                    if entity_info is None:
+                        continue
 
                     if category == "primary":
                         results["primary_entities"].append(entity_info)
@@ -561,7 +569,8 @@ class SmartDiscovery:
                 # Check friendly name
                 if name_lower in state_obj.name.lower():
                     entity_info = self._create_entity_info(state_obj)
-                    results["related_entities"]["other"].append(entity_info)
+                    if entity_info is not None:
+                        results["related_entities"]["other"].append(entity_info)
                 else:
                     # Check entity aliases
                     entity_registry = er.async_get(self.hass)
@@ -571,6 +580,8 @@ class SmartDiscovery:
                         for alias in entity_aliases:
                             if name_lower in alias.lower():
                                 entity_info = self._create_entity_info(state_obj)
+                                if entity_info is None:
+                                    break
                                 entity_info["matched_alias"] = alias
                                 results["related_entities"]["other"].append(entity_info)
                                 break
@@ -612,6 +623,8 @@ class SmartDiscovery:
 
             # Add to appropriate category
             entity_info = self._create_entity_info(state_obj)
+            if entity_info is None:
+                continue
 
             if entity_domain == "person":
                 results["primary_entities"].append(entity_info)
@@ -709,6 +722,8 @@ class SmartDiscovery:
                     label_registry,
                 ),
             )
+            if entity_info is None:
+                continue
             domain_key = entity_domain.replace("_", " ").title()
             results["related_entities"].setdefault(domain_key, []).append(entity_info)
 
@@ -882,6 +897,8 @@ class SmartDiscovery:
                 entity_entry=entity_entry,
                 entity_context=entity_context,
             )
+            if entity_info is None:
+                continue
 
             entities.append(entity_info)
 
@@ -965,7 +982,7 @@ class SmartDiscovery:
             if useful_attrs:
                 entity_info["attributes"] = useful_attrs
 
-        return entity_info
+        return prepare_listed_entity(entity_info)
 
     def _format_smart_results(
         self, results: Dict[str, Any], limit: int
@@ -1090,6 +1107,42 @@ class SmartDiscovery:
 
         return details
 
+    def _area_name_for_entry(self, entity_entry: Any) -> str:
+        """Area name for an entity, following its device when needed."""
+        if entity_entry is None:
+            return ""
+        area_id = getattr(entity_entry, "area_id", None)
+        if not area_id and getattr(entity_entry, "device_id", None):
+            device = dr.async_get(self.hass).async_get(entity_entry.device_id)
+            area_id = getattr(device, "area_id", None) if device else None
+        if not area_id:
+            return ""
+        area = ar.async_get(self.hass).async_get_area(area_id)
+        return area.name if area else ""
+
+    def _listable(
+        self, entity_id: str, entity_entry: Any = None, area_name: str = ""
+    ) -> bool:
+        """False for unavailable entities that have no human name, alias, or area."""
+        if not async_should_expose(self.hass, "conversation", entity_id):
+            return False
+        state_obj = self.hass.states.get(entity_id)
+        attributes = getattr(state_obj, "attributes", None) or {}
+        if entity_entry is None:
+            entity_entry = er.async_get(self.hass).async_get(entity_id)
+        aliases = (
+            self._get_entity_aliases(entity_entry) if entity_entry is not None else []
+        )
+        record = {
+            "entity_id": entity_id,
+            "state": getattr(state_obj, "state", None) or "unknown",
+            "name": getattr(state_obj, "name", None) or entity_id,
+            "friendly_name": attributes.get("friendly_name"),
+            "aliases": aliases,
+            "area": area_name,
+        }
+        return listing_disposition(record) != "skip"
+
     async def list_areas(self) -> List[Dict[str, Any]]:
         """List all areas with entity counts."""
         area_registry = ar.async_get(self.hass)
@@ -1106,7 +1159,7 @@ class SmartDiscovery:
             # Count entities directly assigned to area
             for entity_entry in entity_registry.entities.values():
                 if entity_entry.area_id == area_entry.id:
-                    if async_should_expose(self.hass, "conversation", entity_entry.entity_id):
+                    if self._listable(entity_entry.entity_id, entity_entry, area_entry.name):
                         entity_count += 1
 
             # Count entities via devices in this area. async_entries_for_area
@@ -1115,7 +1168,7 @@ class SmartDiscovery:
                 for entity_entry in entity_registry.entities.values():
                     if (entity_entry.device_id == device_entry.id
                         and not entity_entry.area_id  # Not already counted
-                        and async_should_expose(self.hass, "conversation", entity_entry.entity_id)):
+                        and self._listable(entity_entry.entity_id, entity_entry, area_entry.name)):
                         entity_count += 1
 
             floor_id = getattr(area_entry, "floor_id", None)
@@ -1145,9 +1198,15 @@ class SmartDiscovery:
     async def list_domains(self) -> List[Dict[str, Any]]:
         """List all domains with entity counts."""
         domain_counts = {}
+        entity_registry = er.async_get(self.hass)
 
         for state_obj in self.hass.states.async_all():
-            if async_should_expose(self.hass, "conversation", state_obj.entity_id):
+            entity_entry = entity_registry.async_get(state_obj.entity_id)
+            if self._listable(
+                state_obj.entity_id,
+                entity_entry,
+                self._area_name_for_entry(entity_entry),
+            ):
                 domain = state_obj.domain
                 domain_counts[domain] = domain_counts.get(domain, 0) + 1
 
@@ -1165,6 +1224,8 @@ class SmartDiscovery:
         entities = []
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
+        area_entry = ar.async_get(self.hass).async_get_area(area_id)
+        area_name = area_entry.name if area_entry else ""
 
         for state in self.hass.states.async_all():
             entity_entry = entity_registry.async_get(state.entity_id)
@@ -1179,8 +1240,8 @@ class SmartDiscovery:
                         entity_area_id = device_entry.area_id
 
             if entity_area_id == area_id:
-                # Only include entities that should be exposed
-                if async_should_expose(self.hass, "conversation", state.entity_id):
+                # Skip unavailable entities that have no human name.
+                if self._listable(state.entity_id, entity_entry, area_name):
                     entities.append({
                         "entity_id": state.entity_id,
                         "name": state.attributes.get("friendly_name", state.entity_id),

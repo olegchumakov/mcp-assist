@@ -14,27 +14,79 @@ from aiohttp import web, WSMsgType
 from aiohttp.web_ws import WebSocketResponse
 
 from homeassistant.core import HomeAssistant, SupportsResponse
-from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.util import dt as dt_util
 
+from .action_verify import (
+    CONFIRM_WAIT_SECONDS,
+    POLL_SECONDS,
+    SETTLED_WAIT_SECONDS,
+    expects_change,
+    facts_from_context,
+    guard_empty_activation,
+    is_dead_snapshot,
+    judge_entity,
+    observation_changed,
+    public_snapshot,
+    render_verification,
+    snapshot_from_mapping,
+)
 from .const import (
     MCP_SERVER_NAME,
     MCP_PROTOCOL_VERSION,
     MAX_ENTITIES_PER_DISCOVERY,
+    CONF_API_KEY,
     CONF_LMSTUDIO_URL,
+    CONF_MODEL_NAME,
+    CONF_SERVER_TYPE,
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_ENABLE_MEMORY_TOOLS,
+    CONF_ENABLE_PERSONALITY,
+    DEFAULT_API_KEY,
     DEFAULT_ENABLE_MEMORY_TOOLS,
+    DEFAULT_ENABLE_PERSONALITY,
+    PERFORM_ACTION_DATA_DESCRIPTION,
     DEFAULT_LMSTUDIO_URL,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS,
+    DEFAULT_MODEL_NAME,
+    GEMINI_BASE_URL,
+    OPENAI_BASE_URL,
+    OPENROUTER_BASE_URL,
+    SERVER_TYPE_GEMINI,
+    SERVER_TYPE_OLLAMA,
+    SERVER_TYPE_OPENAI,
+    SERVER_TYPE_OPENROUTER,
+    SERVER_TYPE_ANTHROPIC,
+    SERVER_TYPE_HERMES,
+    SERVER_TYPE_OPENCLAW,
 )
-from .memory_manager import MemoryManager
+from .memory_rank import (
+    find_exact_text,
+    format_forget_result,
+    format_noop_result,
+    format_remember_result,
+    format_similarity_decision,
+    format_store_decision_prompt,
+    looks_like_personality_request,
+    memory_compare_key,
+    parse_llm_store_decision,
+    parse_store_mode,
+    plan_store,
+    select_forget_matches,
+)
+from .store_decision import complete_store_decision, openai_chat_url
+from .memory_settings import read_memory_settings
+from .runtime import get_assist_runtime
 from .discovery import EntityDiscovery
 from .domain_registry import (
     validate_domain_action,
@@ -154,7 +206,9 @@ class MCPServer:
 
         # Custom tools will be initialized in start() after system entry exists
         self.custom_tools = None
-        self.memory_manager = MemoryManager(hass)
+        # Per-conversation remember guards. Shown texts may be confirmed with
+        # mode=add. A failed update blocks the following mode=add.
+        self._store_guards: dict[str, dict[str, set[str]]] = {}
 
     def _get_shared_setting(self, key: str, default: Any) -> Any:
         """Get a shared setting from system entry with fallback to profile entry."""
@@ -243,12 +297,18 @@ class MCPServer:
             except Exception as e:
                 _LOGGER.error(f"Failed to initialize custom tools: {e}")
 
-            if self._memory_tools_enabled():
+            if self._memory_tools_enabled() or self._personality_enabled():
+                runtime = get_assist_runtime(self.hass)
                 try:
-                    await self.memory_manager.async_initialize()
-                    _LOGGER.info("Memory tools initialized (persist until forgotten)")
+                    if self._memory_tools_enabled():
+                        await runtime.memory.async_initialize()
+                        _LOGGER.info("Memory tools initialized (persist until forgotten)")
+                        runtime.embeddings.schedule_prepare()
+                    if self._personality_enabled():
+                        await runtime.personality.async_initialize()
+                        _LOGGER.info("Personality block initialized")
                 except Exception as err:
-                    _LOGGER.error("Failed to initialize memory tools: %s", err)
+                    _LOGGER.error("Failed to initialize memory or personality: %s", err)
 
             _LOGGER.info(
                 "✅ MCP server started successfully on http://0.0.0.0:%d", self.port
@@ -290,16 +350,227 @@ class MCPServer:
             await self.custom_tools.shutdown()
             self.custom_tools = None
 
-        if self.memory_manager:
-            await self.memory_manager.async_shutdown()
-            self.memory_manager = None
-
         if self.site:
             await self.site.stop()
         if self.runner:
             await self.runner.cleanup()
 
-    async def tool_remember_memory(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def _store_guard(self, conversation_id: str | None) -> dict[str, set[str]]:
+        """Return the shown/failed sets for one conversation."""
+        key = (conversation_id or "").strip() or "default"
+        guard = self._store_guards.get(key)
+        if guard is None:
+            if len(self._store_guards) >= 40:
+                self._store_guards.pop(next(iter(self._store_guards)))
+            guard = {"shown": set(), "failed": set()}
+            self._store_guards[key] = guard
+        return guard
+
+    def _chat_decision_target(self) -> tuple[str, str, str] | None:
+        """OpenAI-compatible chat settings for one short store decision."""
+        entry = self.entry
+        if entry is None:
+            return None
+        server_type = entry.options.get(
+            CONF_SERVER_TYPE, entry.data.get(CONF_SERVER_TYPE, "")
+        )
+        if server_type in {
+            SERVER_TYPE_OLLAMA,
+            SERVER_TYPE_ANTHROPIC,
+            SERVER_TYPE_HERMES,
+            SERVER_TYPE_OPENCLAW,
+        }:
+            return None
+        model = entry.options.get(
+            CONF_MODEL_NAME, entry.data.get(CONF_MODEL_NAME, DEFAULT_MODEL_NAME)
+        )
+        if not model:
+            return None
+        api_key = entry.options.get(
+            CONF_API_KEY, entry.data.get(CONF_API_KEY, DEFAULT_API_KEY)
+        ) or ""
+        if server_type == SERVER_TYPE_GEMINI:
+            base_url = GEMINI_BASE_URL
+        elif server_type == SERVER_TYPE_OPENROUTER:
+            base_url = OPENROUTER_BASE_URL
+        elif server_type == SERVER_TYPE_OPENAI:
+            base_url = entry.options.get(
+                CONF_LMSTUDIO_URL, entry.data.get(CONF_LMSTUDIO_URL, OPENAI_BASE_URL)
+            )
+        else:
+            base_url = entry.options.get(
+                CONF_LMSTUDIO_URL, entry.data.get(CONF_LMSTUDIO_URL, "")
+            )
+        if not base_url:
+            return None
+        return openai_chat_url(str(base_url)), str(api_key), str(model)
+
+    async def _llm_store_decision(
+        self, kind: str, new_text: str, candidates: list
+    ) -> dict[str, Any] | None:
+        """Ask for add/update/noop. None means do not store."""
+        target = self._chat_decision_target()
+        if target is None or not candidates:
+            return None
+        url, api_key, model = target
+        prompt = format_store_decision_prompt(kind, new_text, candidates)
+        raw = await complete_store_decision(
+            url=url, api_key=api_key, model=model, prompt=prompt
+        )
+        if not raw:
+            return None
+        allowed = {str(item.get("id")) for item in candidates if item.get("id")}
+        decision = parse_llm_store_decision(raw, allowed)
+        if decision is None:
+            _LOGGER.warning("Store decision was not usable JSON")
+        return decision
+
+    async def _plan_store_call(
+        self,
+        *,
+        kind: str,
+        mode: str | None,
+        new_text: str,
+        items: list,
+        requested_id: str | None,
+        conversation_id: str | None,
+    ) -> dict[str, Any]:
+        """Score locally, then spend one short model call only when still ambiguous."""
+        exact = find_exact_text(items, new_text)
+        if exact is not None:
+            _LOGGER.info("Store decision for %s: noop (exact)", kind)
+            return {
+                "action": "noop",
+                "reason": "exact",
+                "target_id": exact.get("id"),
+                "target": exact,
+                "candidates": [],
+            }
+        if mode == "noop":
+            _LOGGER.info("Store decision for %s: noop (mode)", kind)
+            return {
+                "action": "noop",
+                "reason": "mode",
+                "target_id": None,
+                "target": None,
+                "candidates": [],
+            }
+        settings = read_memory_settings(self.hass)
+        similarities = await self._score_items(new_text, items)
+        guard = self._store_guard(conversation_id)
+        token = f"{kind}:{memory_compare_key(new_text)}"
+        shown = token in guard["shown"]
+        failed = token in guard["failed"]
+        preview = plan_store(
+            mode=mode,
+            new_text=new_text,
+            items=items,
+            similarities=similarities,
+            requested_id=requested_id,
+            candidate_threshold=settings.candidate_threshold,
+            near_copy_threshold=settings.auto_merge_threshold,
+            candidates_shown=shown,
+            failed_update=failed,
+        )
+        needs_model = (
+            preview["action"] == "candidates"
+            and bool(preview["candidates"])
+            and mode != "add"
+            and not failed
+        )
+        decision = None
+        if needs_model:
+            decision = await self._llm_store_decision(
+                kind, new_text, preview["candidates"]
+            )
+        plan = preview
+        if decision is not None:
+            plan = plan_store(
+                mode=mode,
+                new_text=new_text,
+                items=items,
+                similarities=similarities,
+                requested_id=requested_id,
+                candidate_threshold=settings.candidate_threshold,
+                near_copy_threshold=settings.auto_merge_threshold,
+                candidates_shown=shown,
+                failed_update=failed,
+                llm=decision,
+            )
+        if plan["action"] == "candidates":
+            guard["shown"].add(token)
+            if plan["reason"] == "unknown_id":
+                guard["failed"].add(token)
+        elif token in guard["failed"]:
+            guard["failed"].discard(token)
+        _LOGGER.info(
+            "Store decision for %s: %s (%s)", kind, plan["action"], plan["reason"]
+        )
+        return plan
+
+    def _candidates_result(self, kind: str, new_text: str, candidates: list) -> Dict[str, Any]:
+        """Return real ids and store nothing."""
+        if not candidates:
+            id_field = "memory_id" if kind == "memory" else "instruction_id"
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"NOT STORED. No {kind} with that id. "
+                            f"Nothing was written. Copy {id_field} from an existing row. "
+                            "A category name is not an id."
+                        ),
+                    }
+                ],
+                "stored": False,
+                "isError": True,
+            }
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": format_similarity_decision(kind, new_text, candidates),
+                }
+            ],
+            "stored": False,
+            "candidates": [
+                {
+                    "id": item.get("id"),
+                    "text": item.get("text"),
+                    "category": item.get("category"),
+                    "score": item.get("score"),
+                }
+                for item in candidates
+            ],
+        }
+
+    def _noop_result(self, kind: str, plan: dict[str, Any]) -> Dict[str, Any]:
+        target = plan.get("target") or {}
+        if not target:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "NOOP. Nothing was stored. The fact was already known.",
+                    }
+                ],
+                "stored": False,
+            }
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": format_noop_result(kind, target, plan.get("reason") or ""),
+                }
+            ],
+            "stored": False,
+            kind: target,
+        }
+
+    async def tool_remember_memory(
+        self, args: Dict[str, Any], context: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
         """Store a persisted memory (kept until explicitly forgotten)."""
         memory_text = " ".join(str(args.get("memory") or "").split()).strip()
         if not memory_text:
@@ -309,17 +580,95 @@ class MCPServer:
             }
 
         category = args.get("category")
+        if self._personality_enabled() and looks_like_personality_request(memory_text):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "This is a speaking-style or persona request, so it was not stored as a memory. "
+                            "Call set_personality_instruction now with that instruction. "
+                            "Personality instructions are injected into every later reply."
+                        ),
+                    }
+                ],
+            }
+
+        mode = parse_store_mode(args.get("mode"))
+        if mode == "invalid":
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "NOT STORED. mode must be add, update, or noop. "
+                            "Nothing was written."
+                        ),
+                    }
+                ],
+                "isError": True,
+            }
+        memory_id = str(args.get("memory_id") or "").strip()
+        category_text = str(category).strip() if category is not None else ""
+
         self.publish_progress(
             "tool_start",
             "Storing memory",
             tool="remember_memory",
         )
 
+        conversation_id = (
+            context.get("conversation_id") if isinstance(context, dict) else None
+        )
         try:
-            stored = await self.memory_manager.remember(
-                memory_text,
-                category=category,
+            if mode == "update" and not memory_id:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "NOT STORED. mode=update requires memory_id. "
+                                "Nothing was written. Copy a real id. A category is not an id."
+                            ),
+                        }
+                    ],
+                    "isError": True,
+                    "stored": False,
+                }
+            existing = await self._memory().async_list_raw()
+            plan = await self._plan_store_call(
+                kind="memory",
+                mode=mode,
+                new_text=memory_text,
+                items=existing,
+                requested_id=memory_id or None,
+                conversation_id=None if conversation_id is None else str(conversation_id),
             )
+            if plan["action"] == "noop":
+                return self._noop_result("memory", plan)
+            if plan["action"] == "candidates":
+                return self._candidates_result(
+                    "memory", memory_text, plan["candidates"]
+                )
+            if plan["action"] == "update":
+                target_id = str(plan["target_id"])
+                previous = next(
+                    (item for item in existing if str(item.get("id")) == target_id),
+                    plan.get("target") or {},
+                )
+                stored = await self._memory().async_replace(
+                    target_id,
+                    memory_text,
+                    category=category_text or None,
+                    set_category=bool(category_text),
+                )
+                replaced_text = str(previous.get("text") or "")
+            else:
+                stored = await self._memory().remember(
+                    memory_text,
+                    category=category,
+                )
+                replaced_text = None
         except Exception as err:
             _LOGGER.error("Failed to store memory: %s", err)
             return {
@@ -329,26 +678,26 @@ class MCPServer:
 
         self.publish_progress(
             "tool_complete",
-            "Memory stored",
+            "Memory updated" if replaced_text else "Memory stored",
             tool="remember_memory",
             memory_id=stored["id"],
         )
-
-        category_text = (
-            f" Category: {stored['category']}." if stored.get("category") else ""
+        self.hass.async_create_task(
+            get_assist_runtime(self.hass).embeddings.async_embed_new_memory(
+                stored["id"],
+                stored["text"],
+            )
         )
 
         return {
             "content": [
                 {
                     "type": "text",
-                    "text": (
-                        f"Stored memory [{stored['id']}].{category_text} "
-                        "It is kept until the user asks to forget it."
-                    ),
+                    "text": format_remember_result(stored, replaced_text=replaced_text),
                 }
             ],
             "memory": stored,
+            "stored": True,
         }
 
     async def tool_recall_memories(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -369,7 +718,7 @@ class MCPServer:
         )
 
         try:
-            result = await self.memory_manager.recall(
+            result = await self._memory().recall(
                 query=None if query is None else str(query),
                 category=None if category is None else str(category),
                 limit=limit,
@@ -417,25 +766,134 @@ class MCPServer:
             "result_count": result["total_found"],
         }
 
+    async def _score_items(
+        self,
+        query: str,
+        items: list,
+    ) -> dict[str, float] | None:
+        """Score items against a query. None means the embedding model is not ready."""
+        if not query or not items:
+            return {}
+        try:
+            return await get_assist_runtime(self.hass).embeddings.async_similarities(
+                query, items
+            )
+        except Exception as err:
+            _LOGGER.warning("Similarity scoring failed, using stem match only: %s", err)
+            return None
+
+    async def _forget_across_stores(
+        self,
+        *,
+        memory_id: str | None,
+        instruction_id: str | None,
+        query: str | None,
+        category: str | None,
+        delete_all: bool,
+        search_memories: bool,
+        search_personality: bool,
+    ) -> Dict[str, Any]:
+        """Delete matching memories and, when the id is unknown, personality lines too."""
+        settings = read_memory_settings(self.hass)
+        deleted_memories: list = []
+        deleted_personality: list = []
+        searched_memories = search_memories and self._memory_tools_enabled()
+        searched_personality = search_personality and self._personality_enabled()
+
+        if memory_id:
+            deleted_memories = await self._memory().async_delete_ids({memory_id})
+            searched_personality = False
+            searched_memories = True
+        elif searched_memories and (query or category):
+            memories = await self._memory().async_list_raw()
+            similarities = await self._score_items(query or "", memories) if query else None
+            matches = select_forget_matches(
+                memories,
+                query,
+                category=category,
+                delete_all=delete_all,
+                similarities=similarities,
+                threshold=settings.forget_threshold,
+            )
+            deleted_memories = await self._memory().async_delete_ids(
+                {str(item["id"]) for item in matches}
+            )
+
+        if instruction_id:
+            deleted_personality = await self._personality().async_delete_ids({instruction_id})
+            searched_personality = True
+            if not query:
+                searched_memories = False
+        elif searched_personality and query:
+            instructions = await self._personality().async_view()
+            similarities = await self._score_items(query, instructions)
+            matches = select_forget_matches(
+                instructions,
+                query,
+                delete_all=delete_all,
+                similarities=similarities,
+                threshold=settings.forget_threshold,
+            )
+            deleted_personality = await self._personality().async_delete_ids(
+                {str(item["id"]) for item in matches}
+            )
+
+        message = format_forget_result(
+            deleted_memories,
+            deleted_personality,
+            searched_personality=searched_personality,
+            searched_memories=searched_memories,
+        )
+        deleted_count = len(deleted_memories) + len(deleted_personality)
+        return {
+            "content": [{"type": "text", "text": message}],
+            "isError": deleted_count == 0,
+            "deleted_count": deleted_count,
+            "deleted": deleted_memories,
+            "removed_personality": deleted_personality,
+        }
+
     async def tool_forget_memory(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Delete stored memories by id or query."""
+        """Delete stored memories, and personality lines when the query is not an id."""
         memory_id = args.get("memory_id")
         query = args.get("query")
         category = args.get("category")
         forget_all_matches = bool(args.get("forget_all_matches", False))
+        memory_id_text = None if memory_id is None else str(memory_id).strip()
+        query_text = None if query is None else str(query)
 
         self.publish_progress(
             "tool_start",
             "Deleting stored memory",
             tool="forget_memory",
         )
+        if not memory_id_text and not (query_text and query_text.strip()) and not (
+            category and str(category).strip()
+        ):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "DELETED NOTHING. memory_id, query, or category is required. "
+                            "Tell the user that nothing was deleted."
+                        ),
+                    }
+                ],
+                "isError": True,
+                "deleted_count": 0,
+                "deleted": [],
+            }
 
         try:
-            result = await self.memory_manager.forget(
-                memory_id=None if memory_id is None else str(memory_id),
-                query=None if query is None else str(query),
+            result = await self._forget_across_stores(
+                memory_id=memory_id_text or None,
+                instruction_id=None,
+                query=query_text,
                 category=None if category is None else str(category),
-                delete_all_matches=forget_all_matches,
+                delete_all=forget_all_matches,
+                search_memories=True,
+                search_personality=not memory_id_text,
             )
         except Exception as err:
             _LOGGER.error("Failed to forget memory: %s", err)
@@ -448,30 +906,186 @@ class MCPServer:
             "tool_complete",
             "Memory deletion complete",
             tool="forget_memory",
-            deleted=result["deleted_count"],
+            deleted=result.get("deleted_count", 0),
         )
+        return result
 
-        if result["deleted_count"] == 0:
+    def _format_personality_lines(self, instructions: list) -> str:
+        """Format personality instructions for a tool result."""
+        if not instructions:
+            return "Personality block is empty."
+        lines = ["Personality instructions:"]
+        for item in instructions:
+            lines.append(f"- {item['id']}: {item['text']}")
+        return "\n".join(lines)
+
+    async def tool_view_personality(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the persisted personality instructions."""
+        del args
+        try:
+            instructions = await self._personality().async_view()
+        except Exception as err:
+            _LOGGER.error("Failed to read personality: %s", err)
             return {
-                "content": [{"type": "text", "text": "No matching memories were deleted."}],
-                "deleted_count": 0,
-                "deleted": [],
+                "content": [{"type": "text", "text": f"Failed to read personality: {err}"}],
+                "isError": True,
             }
-
-        deleted = result["deleted"]
-        lines = [f"Deleted {result['deleted_count']} memory item(s):"]
-        for memory in deleted[:10]:
-            category_text = (
-                f" [{memory['category']}]" if memory.get("category") else ""
-            )
-            lines.append(f"- {memory['id']}{category_text}: {memory['text']}")
-        if len(deleted) > 10:
-            lines.append(f"{len(deleted) - 10} additional deleted memories were omitted.")
-
         return {
-            "content": [{"type": "text", "text": "\n".join(lines)}],
-            "deleted_count": result["deleted_count"],
-            "deleted": deleted,
+            "content": [
+                {"type": "text", "text": self._format_personality_lines(instructions)}
+            ],
+            "instructions": instructions,
+        }
+
+    async def tool_set_personality_instruction(
+        self, args: Dict[str, Any], context: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
+        """Add or replace one personality instruction."""
+        text = " ".join(str(args.get("instruction") or "").split()).strip()
+        instruction_id = args.get("instruction_id")
+        instruction_id_text = None if instruction_id is None else str(instruction_id).strip()
+        mode = parse_store_mode(args.get("mode"))
+        if mode == "invalid":
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "NOT STORED. mode must be add, update, or noop. Nothing was written.",
+                    }
+                ],
+                "isError": True,
+            }
+        if mode is None and instruction_id_text:
+            mode = "update"
+        conversation_id = (
+            context.get("conversation_id") if isinstance(context, dict) else None
+        )
+        try:
+            if mode == "update" and not instruction_id_text:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "NOT STORED. mode=update requires instruction_id. "
+                                "Nothing was written."
+                            ),
+                        }
+                    ],
+                    "isError": True,
+                    "stored": False,
+                }
+            existing = await self._personality().async_view()
+            plan = await self._plan_store_call(
+                kind="personality",
+                mode=mode,
+                new_text=text,
+                items=existing,
+                requested_id=instruction_id_text,
+                conversation_id=None if conversation_id is None else str(conversation_id),
+            )
+            if plan["action"] == "noop":
+                return self._noop_result("personality", plan)
+            if plan["action"] == "candidates":
+                return self._candidates_result("personality", text, plan["candidates"])
+            result = await self._personality().async_set(
+                text,
+                instruction_id=str(plan["target_id"]) if plan["action"] == "update" else None,
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to update personality: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to update personality: {err}"}],
+                "isError": True,
+            }
+        return {
+            "content": [{"type": "text", "text": result["message"]}],
+            "isError": not result.get("ok", False),
+            "instructions": result.get("instructions", []),
+        }
+
+    async def tool_remove_personality_instruction(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Remove personality instructions, and memories about the same subject when the id is unknown."""
+        instruction_id = args.get("instruction_id")
+        query = args.get("query")
+        instruction_id_text = None if instruction_id is None else str(instruction_id).strip()
+        query_text = None if query is None else str(query)
+        if not instruction_id_text and not (query_text and query_text.strip()):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "DELETED NOTHING. instruction_id or query is required. "
+                            "Tell the user that nothing was removed."
+                        ),
+                    }
+                ],
+                "isError": True,
+            }
+        try:
+            result = await self._forget_across_stores(
+                memory_id=None,
+                instruction_id=instruction_id_text or None,
+                query=query_text,
+                category=None,
+                delete_all=False,
+                search_memories=not instruction_id_text and self._memory_tools_enabled(),
+                search_personality=True,
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to remove personality instruction: %s", err)
+            return {
+                "content": [
+                    {"type": "text", "text": f"Failed to remove personality instruction: {err}"}
+                ],
+                "isError": True,
+            }
+        return result
+
+    async def tool_merge_duplicate_memories(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge near-duplicates into the newest entry of each group."""
+        del args
+        try:
+            result = await get_assist_runtime(self.hass).embeddings.async_merge_duplicates()
+        except Exception as err:
+            _LOGGER.warning("Failed to merge duplicate memories: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to merge duplicates: {err}"}],
+                "isError": True,
+            }
+        return {
+            "content": [{"type": "text", "text": result.get("message") or "Nothing was merged."}],
+            "isError": not result.get("ok", False),
+            "memory_groups": result.get("memory_groups", []),
+            "personality_groups": result.get("personality_groups", []),
+        }
+
+    async def tool_reset_personality(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Clear the personality block when confirm is true."""
+        if not bool(args.get("confirm")):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Pass confirm=true to erase every personality instruction.",
+                    }
+                ],
+                "isError": True,
+            }
+        try:
+            result = await self._personality().async_reset()
+        except Exception as err:
+            _LOGGER.error("Failed to reset personality: %s", err)
+            return {
+                "content": [{"type": "text", "text": f"Failed to reset personality: {err}"}],
+                "isError": True,
+            }
+        return {
+            "content": [{"type": "text", "text": result["message"]}],
+            "removed_count": result.get("removed_count", 0),
         }
 
     def _is_ip_allowed(self, client_ip: str) -> bool:
@@ -1040,6 +1654,100 @@ class MCPServer:
             )
         )
 
+    def _personality_enabled(self) -> bool:
+        """Return whether the personality block and its tools are enabled."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_PERSONALITY,
+                DEFAULT_ENABLE_PERSONALITY,
+            )
+        )
+
+    def _memory(self):
+        """Shared memory store."""
+        return get_assist_runtime(self.hass).memory
+
+    def _personality(self):
+        """Shared personality store."""
+        return get_assist_runtime(self.hass).personality
+
+    def _personality_tool_definitions(self) -> List[Dict[str, Any]]:
+        """Tool schemas for the personality block."""
+        return [
+            {
+                "name": "view_personality",
+                "description": "Read the persisted personality and behaviour instructions. These are injected into every reply.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "set_personality_instruction",
+                "description": "Add a speaking-style, persona, tone, or form-of-address instruction. Call it once with the instruction only. The server adds it, updates the same instruction, or reports that it is already stored. Do not pass mode or invent an instruction_id. Use this for 'talk to me like a pirate' or 'говори со мной как пират'. Do not store those with remember_memory.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "instruction": {
+                            "type": "string",
+                            "description": "One short behaviour instruction, under 240 characters.",
+                        },
+                        "instruction_id": {
+                            "type": "string",
+                            "description": "Omit this. A real instruction id copied from a tool result. A category name is not an id.",
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["add", "update", "noop"],
+                            "description": "Omit this. The server decides. mode=add does not bypass duplicate checks.",
+                        },
+                    },
+                    "required": ["instruction"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "remove_personality_instruction",
+                "description": "Remove personality instructions by id or by a query. Russian inflections match (пиратов matches пират). When the id is unknown, this also deletes stored memories about the same subject. If the user says to forget everything about a subject, put that phrase in query. If the result says DELETED NOTHING, tell the user nothing was removed. Do not claim you forgot it.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "instruction_id": {
+                            "type": "string",
+                            "description": "Instruction id to remove.",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Text contained by the instruction to remove, used when the id is not known.",
+                        },
+                    },
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "name": "reset_personality",
+                "description": "Erase every personality instruction. Pass confirm=true. Use this when the user wants the default voice back.",
+                "inputSchema": {
+                    "$schema": "http://json-schema.org/draft-07/schema#",
+                    "type": "object",
+                    "properties": {
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Must be true to clear the personality block.",
+                        }
+                    },
+                    "required": ["confirm"],
+                    "additionalProperties": False,
+                },
+            },
+        ]
+
     def _coerce_int_arg(
         self, value: Any, *, default: int, minimum: int, maximum: int
     ) -> int:
@@ -1229,7 +1937,7 @@ class MCPServer:
                         },
                         "data": {
                             "type": "object",
-                            "description": "Additional parameters for the service (e.g., brightness: 50, temperature: 22)",
+                            "description": PERFORM_ACTION_DATA_DESCRIPTION,
                             "additionalProperties": True,
                         },
                     },
@@ -1343,7 +2051,7 @@ class MCPServer:
                 [
                     {
                         "name": "remember_memory",
-                        "description": "Store a fact, preference, or instruction for later recall. Use this only when the user explicitly asks you to remember something. Memories persist until the user asks you to forget them.",
+                        "description": "Store a fact or preference. Call it once with the fact only. The server stores a new row, updates the same fact, or reports that it is already stored. Do not pass mode or memory_id. Do not invent an id or pass a category as an id. 'Олега зовут хозяином' does not replace 'Меня зовут Олег'. Use this only when the user explicitly asks you to remember something. Do not use it for speaking style; use set_personality_instruction for that.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1356,6 +2064,15 @@ class MCPServer:
                                     "type": "string",
                                     "description": "Optional short category such as 'preference', 'household', or 'schedule'.",
                                 },
+                                "mode": {
+                                    "type": "string",
+                                    "enum": ["add", "update", "noop"],
+                                    "description": "Omit this. The server decides. mode=add does not bypass duplicate checks. After a rejected update it stores nothing.",
+                                },
+                                "memory_id": {
+                                    "type": "string",
+                                    "description": "Omit this. A real memory id, copied from a tool result. A category name is not an id.",
+                                },
                             },
                             "required": ["memory"],
                             "additionalProperties": False,
@@ -1363,7 +2080,7 @@ class MCPServer:
                     },
                     {
                         "name": "recall_memories",
-                        "description": "Search stored memories by query or category, or list recent memories when no query is given. Use this for requests like 'what do you remember about my coffee preference?'",
+                        "description": "Search stored facts by query or category, or list recent facts when no query is given. Relevant facts are already injected into the prompt when they match the current request. Use this when the user asks what you remember, or when those injected facts are not enough.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1390,7 +2107,7 @@ class MCPServer:
                     },
                     {
                         "name": "forget_memory",
-                        "description": "Delete one stored memory by id or by query/category match. Use this when the user asks you to forget or update something previously remembered.",
+                        "description": "Delete stored memories about a subject. Also deletes a matching personality instruction when you pass a query instead of a memory_id, so a style saved in either store is removed. Russian inflections match: query пиратов deletes a memory that says пират. Set forget_all_matches true when the user says to forget everything about a subject (забудь всё про ...). If the result says DELETED NOTHING, tell the user nothing was deleted. Do not claim success.",
                         "inputSchema": {
                             "$schema": "http://json-schema.org/draft-07/schema#",
                             "type": "object",
@@ -1409,7 +2126,7 @@ class MCPServer:
                                 },
                                 "forget_all_matches": {
                                     "type": "boolean",
-                                    "description": "Delete every matching memory instead of only the best match.",
+                                    "description": "Delete every matching memory and personality instruction, not only the best match. Set true for 'forget everything about X' or 'забудь всё про ...'.",
                                     "default": False,
                                 },
                             },
@@ -1417,8 +2134,22 @@ class MCPServer:
                             "additionalProperties": False,
                         },
                     },
+                    {
+                        "name": "merge_duplicate_memories",
+                        "description": "Merge only near-identical memories and personality instructions (automatic merge threshold, default 0.91) into the newest entry of each group. Related but different facts are left untouched. Use remember_memory mode=update when you decide two related facts should become one. The result lists every removed line.",
+                        "inputSchema": {
+                            "$schema": "http://json-schema.org/draft-07/schema#",
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                            "additionalProperties": False,
+                        },
+                    },
                 ]
             )
+
+        if self._personality_enabled():
+            tools.extend(self._personality_tool_definitions())
 
         # Add custom tool definitions if enabled
         if self.custom_tools:
@@ -1454,7 +2185,7 @@ class MCPServer:
         elif tool_name == "get_index":
             return await self.tool_get_index()
         elif tool_name == "perform_action":
-            return await self.tool_perform_action(arguments)
+            return await self.tool_perform_action(arguments, context)
         elif tool_name == "set_conversation_state":
             return await self.tool_set_conversation_state(arguments)
         elif tool_name == "run_script":
@@ -1462,11 +2193,21 @@ class MCPServer:
         elif tool_name == "run_automation":
             return await self.tool_run_automation(arguments)
         elif tool_name == "remember_memory":
-            return await self.tool_remember_memory(arguments)
+            return await self.tool_remember_memory(arguments, context)
         elif tool_name == "recall_memories":
             return await self.tool_recall_memories(arguments)
         elif tool_name == "forget_memory":
             return await self.tool_forget_memory(arguments)
+        elif tool_name == "merge_duplicate_memories":
+            return await self.tool_merge_duplicate_memories(arguments)
+        elif tool_name == "view_personality":
+            return await self.tool_view_personality(arguments)
+        elif tool_name == "set_personality_instruction":
+            return await self.tool_set_personality_instruction(arguments, context)
+        elif tool_name == "remove_personality_instruction":
+            return await self.tool_remove_personality_instruction(arguments)
+        elif tool_name == "reset_personality":
+            return await self.tool_reset_personality(arguments)
         elif tool_name == "get_entity_history":
             return await self.tool_get_entity_history(arguments)
         else:
@@ -1747,12 +2488,16 @@ class MCPServer:
         # Format as JSON for structured consumption
         return {"content": [{"type": "text", "text": json.dumps(index, indent=2)}]}
 
-    async def tool_perform_action(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Perform an action on Home Assistant entities with progress notifications."""
+    async def tool_perform_action(
+        self, args: Dict[str, Any], context: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
+        """Perform an action and report whether entity state actually changed."""
         domain = args.get("domain")
         action = args.get("action")
         target = args.get("target", {})
         data = args.get("data", {})
+        if not isinstance(data, dict):
+            data = {}
 
         # Validate required parameters
         if not domain:
@@ -1844,64 +2589,262 @@ class MCPServer:
                 }
 
         try:
-            # Prepare service data
-            service_data = {**resolved_target, **data}
-
-            # Some services (e.g. weather.get_forecasts) only work with
-            # return_response=True; calling them without it makes HA raise
-            supports = self.hass.services.supports_response(domain, service)
-            wants_response = supports is not SupportsResponse.NONE
-
-            # Call the Home Assistant service with the validated service name
-            response = await self.hass.services.async_call(
+            return await self._execute_verified_action(
                 domain=domain,
-                service=service,  # Use the mapped service name
-                service_data=service_data,
-                blocking=True,  # Wait for completion
-                return_response=wants_response,
+                action=action,
+                service=service,
+                data=data,
+                resolved_target=resolved_target,
+                context=context,
             )
-
-            # Wait briefly for state to update
-            await asyncio.sleep(0.5)
-
-            # Notify completion
-            self.publish_progress(
-                "tool_complete",
-                f"Action completed: {domain}.{service}",
-                tool="perform_action",
-                success=True,
-            )
-
-            # Check new states if we have entity_ids
-            result_text = f"✅ Successfully executed {domain}.{service}"
-            if service != action:
-                result_text += f" (mapped from '{action}')"
-
-            if wants_response and response:
-                response = _strip_non_json_serializable(response)
-                result_text += "\n\nResponse:\n" + json.dumps(response, indent=2)
-
-            if "entity_id" in resolved_target:
-                entity_ids = resolved_target["entity_id"]
-                if isinstance(entity_ids, str):
-                    entity_ids = [entity_ids]
-
-                # Get new states
-                states_info = []
-                for entity_id in entity_ids[:10]:  # Limit to first 10 for response size
-                    state = self.hass.states.get(entity_id)
-                    if state:
-                        states_info.append(f"  • {entity_id}: {state.state}")
-
-                if states_info:
-                    result_text += "\n\nNew states:\n" + "\n".join(states_info)
-
-            return {"content": [{"type": "text", "text": result_text}]}
-
         except Exception as err:
             error_msg = f"Service call failed: {err}"
             _LOGGER.exception(error_msg)
             return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+    def _target_entity_ids(self, resolved_target: Dict[str, Any]) -> List[str]:
+        """Entity ids named by the target, including entities of a device id."""
+        found: List[str] = []
+        raw_ids = resolved_target.get("entity_id")
+        if isinstance(raw_ids, str):
+            found.append(raw_ids)
+        elif isinstance(raw_ids, list):
+            found.extend(str(entity_id) for entity_id in raw_ids if entity_id)
+
+        device_ids = resolved_target.get("device_id")
+        if isinstance(device_ids, str):
+            device_ids = [device_ids]
+        if isinstance(device_ids, list):
+            try:
+                registry = er.async_get(self.hass)
+                wanted = {str(device_id) for device_id in device_ids if device_id}
+                for entry in registry.entities.values():
+                    if getattr(entry, "device_id", None) in wanted:
+                        found.append(entry.entity_id)
+            except Exception:
+                _LOGGER.debug("Could not expand device_id to entities", exc_info=True)
+
+        unique: List[str] = []
+        for entity_id in found:
+            if entity_id not in unique:
+                unique.append(entity_id)
+        return unique
+
+    def _snapshot_entity(self, entity_id: str) -> Dict[str, Any]:
+        """Read one entity, including name and area when the registry has them."""
+        state_obj = self.hass.states.get(entity_id)
+        if state_obj is None:
+            return snapshot_from_mapping(
+                {"entity_id": entity_id, "missing": True, "state": "unknown"}
+            )
+        area = ""
+        aliases: List[str] = []
+        try:
+            entry = er.async_get(self.hass).async_get(entity_id)
+            if entry is not None:
+                aliases = [
+                    str(alias)
+                    for alias in (getattr(entry, "aliases", None) or [])
+                    if alias
+                ]
+                area_id = getattr(entry, "area_id", None)
+                if not area_id and getattr(entry, "device_id", None):
+                    device = dr.async_get(self.hass).async_get(entry.device_id)
+                    area_id = getattr(device, "area_id", None) if device else None
+                if area_id:
+                    area_entry = ar.async_get(self.hass).async_get_area(area_id)
+                    area = area_entry.name if area_entry else ""
+        except Exception:
+            _LOGGER.debug(
+                "Could not read registry context for %s", entity_id, exc_info=True
+            )
+        attributes = dict(getattr(state_obj, "attributes", None) or {})
+        return snapshot_from_mapping(
+            {
+                "entity_id": entity_id,
+                "state": state_obj.state,
+                "name": getattr(state_obj, "name", None)
+                or attributes.get("friendly_name")
+                or entity_id,
+                "friendly_name": attributes.get("friendly_name"),
+                "area": area,
+                "aliases": aliases,
+                "attributes": attributes,
+                "last_updated": getattr(state_obj, "last_updated", None),
+                "last_reported": getattr(state_obj, "last_reported", None),
+                "missing": False,
+            }
+        )
+
+    async def _wait_for_state_reports(
+        self,
+        entity_ids: List[str],
+        before: Dict[str, Dict[str, Any]],
+        timeout: float,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Poll until a snapshot changes or the wait expires."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        latest = {entity_id: before[entity_id] for entity_id in entity_ids}
+        while True:
+            latest = {
+                entity_id: self._snapshot_entity(entity_id) for entity_id in entity_ids
+            }
+            if any(
+                observation_changed(before[entity_id], latest[entity_id])
+                for entity_id in entity_ids
+            ):
+                return latest
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return latest
+            await asyncio.sleep(min(POLL_SECONDS, remaining))
+
+    async def _execute_verified_action(
+        self,
+        *,
+        domain: str,
+        action: str,
+        service: str,
+        data: Dict[str, Any],
+        resolved_target: Dict[str, Any],
+        context: Dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        """Call the service only when we can still confirm the outcome."""
+        entity_ids = self._target_entity_ids(resolved_target)[:10]
+        before = {
+            entity_id: self._snapshot_entity(entity_id) for entity_id in entity_ids
+        }
+        live_ids = [
+            entity_id
+            for entity_id, snapshot in before.items()
+            if not is_dead_snapshot(snapshot)
+        ]
+        if entity_ids and not live_ids:
+            rows = [
+                {"status": "not_done", "before": snapshot, "after": snapshot}
+                for snapshot in before.values()
+            ]
+            self._publish_action_finished(domain, service, success=False)
+            return self._verification_result(rows)
+
+        guard = guard_empty_activation(
+            service,
+            data,
+            [before[entity_id] for entity_id in live_ids],
+            facts_from_context(context),
+        )
+        if guard:
+            self._publish_action_finished(domain, service, success=False)
+            return {
+                "content": [{"type": "text", "text": guard}],
+                "isError": True,
+                "action_result": {"status": "not_done", "entities": []},
+            }
+
+        call_target = dict(resolved_target)
+        if "entity_id" in call_target and live_ids:
+            call_target["entity_id"] = live_ids
+        service_data = {**call_target, **data}
+
+        supports = self.hass.services.supports_response(domain, service)
+        wants_response = supports is not SupportsResponse.NONE
+        response = await self.hass.services.async_call(
+            domain=domain,
+            service=service,
+            service_data=service_data,
+            blocking=True,
+            return_response=wants_response,
+        )
+
+        if not entity_ids:
+            self._publish_action_finished(
+                domain, service, success=bool(wants_response and response)
+            )
+            if wants_response and response:
+                response = _strip_non_json_serializable(response)
+                text = (
+                    "SERVICE RESPONSE. This is data from the service, "
+                    "not a confirmed device change.\n"
+                    + json.dumps(response, indent=2)
+                )
+                return {"content": [{"type": "text", "text": text}]}
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "NOT CONFIRMED\n"
+                            "No entity state was available to confirm this call. "
+                            "Do not say the action was done."
+                        ),
+                    }
+                ],
+                "isError": True,
+                "action_result": {"status": "not_confirmed", "entities": []},
+            }
+
+        timeout = (
+            CONFIRM_WAIT_SECONDS
+            if any(
+                expects_change(service, data, before[entity_id])
+                for entity_id in live_ids
+            )
+            else SETTLED_WAIT_SECONDS
+        )
+        after = await self._wait_for_state_reports(live_ids, before, timeout)
+        rows = []
+        for entity_id, snapshot in before.items():
+            if is_dead_snapshot(snapshot):
+                rows.append(
+                    {"status": "not_done", "before": snapshot, "after": snapshot}
+                )
+                continue
+            later = after.get(entity_id, snapshot)
+            rows.append(
+                {
+                    "status": judge_entity(service, data, snapshot, later),
+                    "before": snapshot,
+                    "after": later,
+                }
+            )
+        result = self._verification_result(rows)
+        if wants_response and response:
+            response = _strip_non_json_serializable(response)
+            result["content"][0]["text"] += "\n\nResponse:\n" + json.dumps(
+                response, indent=2
+            )
+        self._publish_action_finished(domain, service, success=not result.get("isError"))
+        return result
+
+    def _publish_action_finished(self, domain: str, service: str, *, success: bool) -> None:
+        self.publish_progress(
+            "tool_complete",
+            f"Action completed: {domain}.{service}",
+            tool="perform_action",
+            success=success,
+        )
+
+    def _verification_result(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        text, is_error, status = render_verification(rows)
+        result: Dict[str, Any] = {
+            "content": [{"type": "text", "text": text}],
+            "action_result": {
+                "status": status,
+                "entities": [
+                    {
+                        "entity_id": (row.get("before") or {}).get("entity_id"),
+                        "status": row.get("status"),
+                        "before": public_snapshot(row.get("before") or {}),
+                        "after": public_snapshot(row.get("after") or {}),
+                    }
+                    for row in rows
+                ],
+            },
+        }
+        if is_error:
+            result["isError"] = True
+        return result
 
     async def tool_set_conversation_state(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Set whether the assistant expects a user response."""

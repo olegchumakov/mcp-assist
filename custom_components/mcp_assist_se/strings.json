@@ -81,6 +81,38 @@
           "enable_memory_tools": "Lets the assistant remember, recall and forget user-approved facts and preferences. Memories persist until you ask to forget them.",
           "searxng_url": "Base URL of your SearXNG instance (for example, http://192.168.11.102:8888). Used when Web Search is set to SearXNG."
         }
+      },
+      "memory": {
+        "title": "Memory and personality",
+        "description": "Shared by every profile. Local embeddings run on this Home Assistant and do not call an external API. Until the model has downloaded, keyword matching is used.",
+        "data": {
+          "enable_personality": "Enable personality block",
+          "memory_auto_retrieve": "Retrieve relevant memories automatically",
+          "memory_top_k": "Memories to inject (1-8)",
+          "memory_similarity_threshold": "Similarity threshold",
+          "memory_candidate_threshold": "Similar-memory candidates",
+          "memory_auto_merge_threshold": "Automatic merge threshold",
+          "memory_forget_threshold": "Forget threshold",
+          "memory_include_last_turn": "Include the previous user turn in the search",
+          "embedding_provider": "Embedding provider",
+          "local_embedding_model": "Local embedding model",
+          "embedding_model": "Remote embedding model",
+          "embedding_base_url": "Remote embedding base URL"
+        },
+        "data_description": {
+          "enable_personality": "A short style and persona block that is added to every prompt. Edit it by voice, for example: talk to me like a pirate.",
+          "memory_auto_retrieve": "Before each reply, search stored memories and inject the closest facts. Facts stay in memory; speaking style goes in the personality block.",
+          "memory_top_k": "Maximum number of remembered facts to add to the prompt.",
+          "memory_similarity_threshold": "Minimum cosine similarity. 0.78 suits rubert-tiny-turbo on short phrases. Raise it if unrelated facts appear.",
+          "memory_candidate_threshold": "Show existing memories at or above this score and let the assistant choose add, update, or leave them. 0.65 on rubert-tiny-turbo. Nothing is overwritten until the assistant picks update.",
+          "memory_auto_merge_threshold": "Only near-identical copies are merged automatically. 0.91 keeps name paraphrases (about 0.92) and leaves different facts alone, including 'Олега зовут хозяином' (about 0.90) and the two bright-white-light values (about 0.82).",
+          "memory_forget_threshold": "Semantic match for forget. 0.80 suits rubert-tiny-turbo. Inflected words such as пиратов also match пират by stem even below this score.",
+          "memory_include_last_turn": "Also match memories against the previous thing you said, so a follow-up like 'turn that on' can find the right fact.",
+          "embedding_provider": "Local runs on this machine. OpenAI-compatible calls /v1/embeddings on a remote server and is optional.",
+          "local_embedding_model": "rubert-tiny-turbo is the Russian default: about 118 MB download and 180 MB RAM. multilingual-e5-small is multilingual, about 490 MB download and 700 MB RAM, and is slower on a small CPU.",
+          "embedding_model": "Used only for the OpenAI-compatible provider. text-embedding-3-small works on OpenAI. Your gateway must actually serve this model.",
+          "embedding_base_url": "Leave empty to use this profile's chat server URL. Example: https://openai.bothub.chat"
+        }
       }
     },
     "error": {
@@ -95,7 +127,9 @@
       "auth_failed": "Authentication failed. Please verify your API key.",
       "unknown": "An unknown error occurred.",
       "openclaw_not_paired": "Device not yet approved on the OpenClaw server. Please approve it and try again.",
-      "openclaw_connection_failed": "Could not connect to the OpenClaw gateway. Check the host, port, and token."
+      "openclaw_connection_failed": "Could not connect to the OpenClaw gateway. Check the host, port, and token.",
+      "invalid_embedding_url": "Embedding base URL must start with http:// or https://.",
+      "embedding_model_required": "Enter the remote embedding model name when the OpenAI-compatible provider is selected."
     },
     "abort": {
       "already_configured": "A profile with this name already exists. Please choose a different name."
@@ -159,6 +193,38 @@
           "enable_memory_tools": "Lets the assistant remember, recall and forget user-approved facts and preferences. Memories persist until you ask to forget them.",
           "searxng_url": "Base URL of your SearXNG instance (for example, http://192.168.11.102:8888). Used when Web Search is set to SearXNG."
         }
+      },
+      "memory": {
+        "title": "Memory and personality",
+        "description": "Shared by every profile. Local embeddings run on this Home Assistant and do not call an external API. Until the model has downloaded, keyword matching is used.",
+        "data": {
+          "enable_personality": "Enable personality block",
+          "memory_auto_retrieve": "Retrieve relevant memories automatically",
+          "memory_top_k": "Memories to inject (1-8)",
+          "memory_similarity_threshold": "Similarity threshold",
+          "memory_candidate_threshold": "Similar-memory candidates",
+          "memory_auto_merge_threshold": "Automatic merge threshold",
+          "memory_forget_threshold": "Forget threshold",
+          "memory_include_last_turn": "Include the previous user turn in the search",
+          "embedding_provider": "Embedding provider",
+          "local_embedding_model": "Local embedding model",
+          "embedding_model": "Remote embedding model",
+          "embedding_base_url": "Remote embedding base URL"
+        },
+        "data_description": {
+          "enable_personality": "A short style and persona block that is added to every prompt. Edit it by voice, for example: talk to me like a pirate.",
+          "memory_auto_retrieve": "Before each reply, search stored memories and inject the closest facts. Facts stay in memory; speaking style goes in the personality block.",
+          "memory_top_k": "Maximum number of remembered facts to add to the prompt.",
+          "memory_similarity_threshold": "Minimum cosine similarity. 0.78 suits rubert-tiny-turbo on short phrases. Raise it if unrelated facts appear.",
+          "memory_candidate_threshold": "Show existing memories at or above this score and let the assistant choose add, update, or leave them. 0.65 on rubert-tiny-turbo. Nothing is overwritten until the assistant picks update.",
+          "memory_auto_merge_threshold": "Only near-identical copies are merged automatically. 0.91 keeps name paraphrases (about 0.92) and leaves different facts alone, including 'Олега зовут хозяином' (about 0.90) and the two bright-white-light values (about 0.82).",
+          "memory_forget_threshold": "Semantic match for forget. 0.80 suits rubert-tiny-turbo. Inflected words such as пиратов also match пират by stem even below this score.",
+          "memory_include_last_turn": "Also match memories against the previous thing you said, so a follow-up like 'turn that on' can find the right fact.",
+          "embedding_provider": "Local runs on this machine. OpenAI-compatible calls /v1/embeddings on a remote server and is optional.",
+          "local_embedding_model": "rubert-tiny-turbo is the Russian default: about 118 MB download and 180 MB RAM. multilingual-e5-small is multilingual, about 490 MB download and 700 MB RAM, and is slower on a small CPU.",
+          "embedding_model": "Used only for the OpenAI-compatible provider. text-embedding-3-small works on OpenAI. Your gateway must actually serve this model.",
+          "embedding_base_url": "Leave empty to use this profile's chat server URL. Example: https://openai.bothub.chat"
+        }
       }
     }
   },
@@ -166,6 +232,20 @@
     "conversation": {
       "mcp_assist_se": {
         "name": "{profile_name}"
+      }
+    }
+  },
+  "selector": {
+    "embedding_provider": {
+      "options": {
+        "local": "Local model on this Home Assistant",
+        "openai": "OpenAI-compatible /v1/embeddings (optional)"
+      }
+    },
+    "local_embedding_model": {
+      "options": {
+        "rubert-tiny-turbo": "rubert-tiny-turbo — Russian, ~118 MB, ~180 MB RAM",
+        "multilingual-e5-small": "multilingual-e5-small — multilingual, ~490 MB, ~700 MB RAM"
       }
     }
   },

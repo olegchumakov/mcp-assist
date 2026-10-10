@@ -18,6 +18,9 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
@@ -49,6 +52,20 @@ from .const import (
     CONF_ENABLE_CUSTOM_TOOLS,
     CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS,
     CONF_ENABLE_MEMORY_TOOLS,
+    CONF_ENABLE_PERSONALITY,
+    CONF_MEMORY_AUTO_RETRIEVE,
+    CONF_MEMORY_TOP_K,
+    CONF_MEMORY_SIMILARITY_THRESHOLD,
+    CONF_MEMORY_CANDIDATE_THRESHOLD,
+    CONF_MEMORY_AUTO_MERGE_THRESHOLD,
+    CONF_MEMORY_FORGET_THRESHOLD,
+    CONF_MEMORY_INCLUDE_LAST_TURN,
+    CONF_EMBEDDING_PROVIDER,
+    CONF_LOCAL_EMBEDDING_MODEL,
+    CONF_EMBEDDING_MODEL,
+    CONF_EMBEDDING_BASE_URL,
+    EMBEDDING_PROVIDER_LOCAL,
+    EMBEDDING_PROVIDER_OPENAI,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
     CONF_BRAVE_API_KEY,
@@ -129,6 +146,144 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _shared_config_source(hass: HomeAssistant) -> dict[str, Any]:
+    """Merged shared settings, options overriding data."""
+    from . import get_system_entry
+
+    source: dict[str, Any] = {}
+    system_entry = get_system_entry(hass)
+    if system_entry is not None:
+        source.update(system_entry.data)
+        source.update(system_entry.options)
+    return source
+
+
+def memory_settings_schema(current: dict[str, Any]) -> vol.Schema:
+    """Options shown for personality and automatic memory retrieval."""
+    from .local_embedder import local_model_spec
+    from .memory_settings import normalize_memory_options
+
+    normalized = normalize_memory_options(current)
+    choice = local_model_spec(normalized[CONF_LOCAL_EMBEDDING_MODEL]).choice_key
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_ENABLE_PERSONALITY,
+                default=normalized[CONF_ENABLE_PERSONALITY],
+            ): bool,
+            vol.Required(
+                CONF_MEMORY_AUTO_RETRIEVE,
+                default=normalized[CONF_MEMORY_AUTO_RETRIEVE],
+            ): bool,
+            vol.Required(
+                CONF_MEMORY_TOP_K,
+                default=normalized[CONF_MEMORY_TOP_K],
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=1, max=8, step=1, mode=NumberSelectorMode.BOX
+                )
+            ),
+            vol.Required(
+                CONF_MEMORY_SIMILARITY_THRESHOLD,
+                default=normalized[CONF_MEMORY_SIMILARITY_THRESHOLD],
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=1,
+                    step=0.01,
+                    mode=NumberSelectorMode.SLIDER,
+                )
+            ),
+            vol.Required(
+                CONF_MEMORY_CANDIDATE_THRESHOLD,
+                default=normalized[CONF_MEMORY_CANDIDATE_THRESHOLD],
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=1,
+                    step=0.01,
+                    mode=NumberSelectorMode.SLIDER,
+                )
+            ),
+            vol.Required(
+                CONF_MEMORY_AUTO_MERGE_THRESHOLD,
+                default=normalized[CONF_MEMORY_AUTO_MERGE_THRESHOLD],
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=1,
+                    step=0.01,
+                    mode=NumberSelectorMode.SLIDER,
+                )
+            ),
+            vol.Required(
+                CONF_MEMORY_FORGET_THRESHOLD,
+                default=normalized[CONF_MEMORY_FORGET_THRESHOLD],
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=1,
+                    step=0.01,
+                    mode=NumberSelectorMode.SLIDER,
+                )
+            ),
+            vol.Required(
+                CONF_MEMORY_INCLUDE_LAST_TURN,
+                default=normalized[CONF_MEMORY_INCLUDE_LAST_TURN],
+            ): bool,
+            vol.Required(
+                CONF_EMBEDDING_PROVIDER,
+                default=normalized[CONF_EMBEDDING_PROVIDER],
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=[EMBEDDING_PROVIDER_LOCAL, EMBEDDING_PROVIDER_OPENAI],
+                    translation_key="embedding_provider",
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required(
+                CONF_LOCAL_EMBEDDING_MODEL,
+                default=choice,
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=["rubert-tiny-turbo", "multilingual-e5-small"],
+                    translation_key="local_embedding_model",
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(
+                CONF_EMBEDDING_MODEL,
+                default=normalized[CONF_EMBEDDING_MODEL],
+            ): str,
+            vol.Optional(
+                CONF_EMBEDDING_BASE_URL,
+                default=normalized[CONF_EMBEDDING_BASE_URL],
+            ): str,
+        }
+    )
+
+
+def validate_memory_submission(
+    user_input: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Validate the memory step and return stored values."""
+    from .memory_settings import normalize_memory_options
+
+    errors: dict[str, str] = {}
+    base_url = str(user_input.get(CONF_EMBEDDING_BASE_URL) or "").strip()
+    if base_url and not (
+        base_url.startswith("http://") or base_url.startswith("https://")
+    ):
+        errors[CONF_EMBEDDING_BASE_URL] = "invalid_embedding_url"
+    provider = user_input.get(CONF_EMBEDDING_PROVIDER)
+    model_name = str(user_input.get(CONF_EMBEDDING_MODEL) or "").strip()
+    if provider == EMBEDDING_PROVIDER_OPENAI and not model_name:
+        errors[CONF_EMBEDDING_MODEL] = "embedding_model_required"
+    if errors:
+        return {}, errors
+    return normalize_memory_options(user_input), {}
 
 
 async def fetch_models_from_lmstudio(hass: HomeAssistant, url: str) -> list[str]:
@@ -486,6 +641,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.step2_data: dict[str, Any] = {}
         self.step3_data: dict[str, Any] = {}
         self.step4_data: dict[str, Any] = {}
+        self.pending_shared: dict[str, Any] = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -1116,66 +1272,13 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.warning("Invalid allowed IPs: %s", error_msg)
 
             if not errors:
-                # Create/update system entry with shared settings
-                from . import get_system_entry
-
-                system_entry = get_system_entry(self.hass)
-
-                if not system_entry:
-                    # Create system entry with shared settings
-                    await self.hass.config_entries.flow.async_init(
-                        DOMAIN, context={"source": "system"}, data=user_input
-                    )
-                    _LOGGER.info(
-                        "Created system entry with shared MCP settings from initial setup"
-                    )
-                else:
-                    # Update existing system entry
-                    self.hass.config_entries.async_update_entry(
-                        system_entry, data={**system_entry.data, **user_input}
-                    )
-                    _LOGGER.info(
-                        "Updated existing system entry with shared MCP settings"
-                    )
-
-                # Combine data from steps 1-4 (profile settings only, no shared settings)
-                combined_data = {
-                    **self.step1_data,
-                    **self.step2_data,
-                    **self.step3_data,
-                    **self.step4_data,
-                }
-
-                # Create profile config entry
-                profile_name = combined_data[CONF_PROFILE_NAME]
-                server_type = combined_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
-
-                server_display_map = {
-                    SERVER_TYPE_LMSTUDIO: "LM Studio",
-                    SERVER_TYPE_LLAMACPP: "llama.cpp",
-                    SERVER_TYPE_OLLAMA: "Ollama",
-                    SERVER_TYPE_OPENAI: "OpenAI",
-                    SERVER_TYPE_GEMINI: "Gemini",
-                    SERVER_TYPE_ANTHROPIC: "Claude",
-                    SERVER_TYPE_OPENROUTER: "OpenRouter",
-                    SERVER_TYPE_OPENCLAW: "OpenClaw",
-                    SERVER_TYPE_HERMES: "Hermes Agent",
-                    SERVER_TYPE_VLLM: "vLLM",
-                }
-                server_display = server_display_map.get(server_type, "LM Studio")
-
-                unique_id = (
-                    f"{DOMAIN}_{server_type}_{profile_name.lower().replace(' ', '_')}"
-                )
-                await self.async_set_unique_id(unique_id)
-                self._abort_if_unique_id_configured()
-
-                return self.async_create_entry(
-                    title=f"{server_display} - {profile_name}",
-                    data=combined_data,
-                )
+                self.pending_shared = dict(user_input)
+                return await self.async_step_memory()
 
         # Build schema for MCP server settings
+        shared_source = _shared_config_source(self.hass)
+        sys_options = shared_source
+        sys_data = shared_source
         mcp_schema = vol.Schema(
             {
                 vol.Required(CONF_MCP_PORT, default=DEFAULT_MCP_PORT): vol.Coerce(int),
@@ -1245,6 +1348,72 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "info": "⚠️ These settings will be shared across ALL profiles. Restart Home Assistant after making changes."
             },
+        )
+
+    async def async_step_memory(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Personality block and automatic memory retrieval (first profile)."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            normalized, errors = validate_memory_submission(user_input)
+            if not errors:
+                from . import get_system_entry
+
+                shared = {**self.pending_shared, **normalized}
+                system_entry = get_system_entry(self.hass)
+                if not system_entry:
+                    await self.hass.config_entries.flow.async_init(
+                        DOMAIN, context={"source": "system"}, data=shared
+                    )
+                    _LOGGER.info(
+                        "Created system entry with shared MCP settings from initial setup"
+                    )
+                else:
+                    self.hass.config_entries.async_update_entry(
+                        system_entry, data={**system_entry.data, **shared}
+                    )
+                    _LOGGER.info(
+                        "Updated existing system entry with shared MCP settings"
+                    )
+
+                combined_data = {
+                    **self.step1_data,
+                    **self.step2_data,
+                    **self.step3_data,
+                    **self.step4_data,
+                }
+                profile_name = combined_data[CONF_PROFILE_NAME]
+                server_type = combined_data.get(CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE)
+                server_display_map = {
+                    SERVER_TYPE_LMSTUDIO: "LM Studio",
+                    SERVER_TYPE_LLAMACPP: "llama.cpp",
+                    SERVER_TYPE_OLLAMA: "Ollama",
+                    SERVER_TYPE_OPENAI: "OpenAI",
+                    SERVER_TYPE_GEMINI: "Gemini",
+                    SERVER_TYPE_ANTHROPIC: "Claude",
+                    SERVER_TYPE_OPENROUTER: "OpenRouter",
+                    SERVER_TYPE_OPENCLAW: "OpenClaw",
+                    SERVER_TYPE_HERMES: "Hermes Agent",
+                    SERVER_TYPE_VLLM: "vLLM",
+                }
+                server_display = server_display_map.get(server_type, "LM Studio")
+                unique_id = (
+                    f"{DOMAIN}_{server_type}_{profile_name.lower().replace(' ', '_')}"
+                )
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(
+                    title=f"{server_display} - {profile_name}",
+                    data=combined_data,
+                )
+
+        current = _shared_config_source(self.hass)
+        current.update(self.pending_shared)
+        return self.async_show_form(
+            step_id="memory",
+            data_schema=memory_settings_schema(current),
+            errors=errors,
         )
 
     async def async_step_system(self, data: dict[str, Any]) -> FlowResult:
@@ -1768,49 +1937,8 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 _LOGGER.warning("Invalid allowed IPs in options: %s", error_msg)
 
             if not errors:
-                # Import get_system_entry
-                from . import get_system_entry
-
-                # Update system entry with shared MCP settings
-                system_entry = get_system_entry(self.hass)
-                if system_entry:
-                    self.hass.config_entries.async_update_entry(
-                        system_entry, data={**system_entry.data, **user_input}
-                    )
-                    _LOGGER.info("Updated system entry with shared MCP settings")
-                else:
-                    _LOGGER.error("System entry not found when saving shared settings")
-
-                # Update profile entry with per-profile settings only
-                # Update entry title if profile name changed
-                new_profile_name = self.profile_options.get(CONF_PROFILE_NAME)
-                old_profile_name = self.config_entry.options.get(
-                    CONF_PROFILE_NAME, self.config_entry.data.get(CONF_PROFILE_NAME)
-                )
-                if new_profile_name and new_profile_name != old_profile_name:
-                    server_type = self.config_entry.data.get(
-                        CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE
-                    )
-                    server_display_map = {
-                        SERVER_TYPE_LMSTUDIO: "LM Studio",
-                        SERVER_TYPE_LLAMACPP: "llama.cpp",
-                        SERVER_TYPE_OLLAMA: "Ollama",
-                        SERVER_TYPE_OPENAI: "OpenAI",
-                        SERVER_TYPE_GEMINI: "Gemini",
-                        SERVER_TYPE_ANTHROPIC: "Claude",
-                        SERVER_TYPE_OPENROUTER: "OpenRouter",
-                        SERVER_TYPE_OPENCLAW: "OpenClaw",
-                        SERVER_TYPE_HERMES: "Hermes Agent",
-                        SERVER_TYPE_VLLM: "vLLM",
-                    }
-                    server_display = server_display_map.get(server_type, "LM Studio")
-                    self.hass.config_entries.async_update_entry(
-                        self.config_entry,
-                        title=f"{server_display} - {new_profile_name}",
-                    )
-
-                # Save profile settings only (not shared settings)
-                return self.async_create_entry(title="", data=self.profile_options)
+                self._update_shared_settings(user_input)
+                return await self.async_step_memory()
 
         # Get current values from system entry
         from . import get_system_entry
@@ -1946,6 +2074,63 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
                 "warning": "⚠️ These settings are shared across ALL MCP Assist profiles. Restart Home Assistant after making changes."
             },
         )
+
+    def _update_shared_settings(self, updates: dict[str, Any]) -> None:
+        """Merge keys into the shared system entry."""
+        from . import get_system_entry
+
+        system_entry = get_system_entry(self.hass)
+        if system_entry:
+            self.hass.config_entries.async_update_entry(
+                system_entry, data={**system_entry.data, **updates}
+            )
+            _LOGGER.info("Updated system entry with shared MCP settings")
+        else:
+            _LOGGER.error("System entry not found when saving shared settings")
+
+    async def async_step_memory(self, user_input=None):
+        """Personality block and automatic memory retrieval."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            normalized, errors = validate_memory_submission(user_input)
+            if not errors:
+                self._update_shared_settings(normalized)
+                return self._finish_profile_options()
+
+        return self.async_show_form(
+            step_id="memory",
+            data_schema=memory_settings_schema(_shared_config_source(self.hass)),
+            errors=errors,
+        )
+
+    def _finish_profile_options(self):
+        """Save per-profile options and rename the entry when the profile name changed."""
+        new_profile_name = self.profile_options.get(CONF_PROFILE_NAME)
+        old_profile_name = self.config_entry.options.get(
+            CONF_PROFILE_NAME, self.config_entry.data.get(CONF_PROFILE_NAME)
+        )
+        if new_profile_name and new_profile_name != old_profile_name:
+            server_type = self.config_entry.data.get(
+                CONF_SERVER_TYPE, DEFAULT_SERVER_TYPE
+            )
+            server_display_map = {
+                SERVER_TYPE_LMSTUDIO: "LM Studio",
+                SERVER_TYPE_LLAMACPP: "llama.cpp",
+                SERVER_TYPE_OLLAMA: "Ollama",
+                SERVER_TYPE_OPENAI: "OpenAI",
+                SERVER_TYPE_GEMINI: "Gemini",
+                SERVER_TYPE_ANTHROPIC: "Claude",
+                SERVER_TYPE_OPENROUTER: "OpenRouter",
+                SERVER_TYPE_OPENCLAW: "OpenClaw",
+                SERVER_TYPE_HERMES: "Hermes Agent",
+                SERVER_TYPE_VLLM: "vLLM",
+            }
+            server_display = server_display_map.get(server_type, "LM Studio")
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                title=f"{server_display} - {new_profile_name}",
+            )
+        return self.async_create_entry(title="", data=self.profile_options)
 
 
 class CannotConnect(HomeAssistantError):

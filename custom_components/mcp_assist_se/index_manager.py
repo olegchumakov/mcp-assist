@@ -42,6 +42,7 @@ try:
 except ImportError:  # pragma: no cover - older Home Assistant versions
     lr = None
 
+from .action_verify import index_display_name, listing_disposition
 from .ha_compat import devices_by_label
 
 _LOGGER = logging.getLogger(__name__)
@@ -291,6 +292,34 @@ class IndexManager:
 
         return sorted(label_names, key=str.casefold)
 
+    def _index_record(self, entity: Any) -> Dict[str, Any] | None:
+        """Exposed entity, or None when an unnamed unavailable entity is skipped."""
+        if not async_should_expose(self.hass, "conversation", entity.entity_id):
+            return None
+        state_obj = self.hass.states.get(entity.entity_id)
+        attributes = getattr(state_obj, "attributes", None) or {}
+        area_name = ""
+        area_id = getattr(entity, "area_id", None)
+        if not area_id and getattr(entity, "device_id", None):
+            device = dr.async_get(self.hass).async_get(entity.device_id)
+            area_id = getattr(device, "area_id", None) if device else None
+        if area_id:
+            area = ar.async_get(self.hass).async_get_area(area_id)
+            area_name = area.name if area else ""
+        record = {
+            "entity_id": entity.entity_id,
+            "state": getattr(state_obj, "state", None) or "unknown",
+            "name": getattr(state_obj, "name", None) or entity.entity_id,
+            "friendly_name": attributes.get("friendly_name"),
+            "aliases": list(getattr(entity, "aliases", None) or []),
+            "area": area_name,
+        }
+        if listing_disposition(record) == "skip":
+            return None
+        record["display_name"] = index_display_name(record)
+        record["state_obj"] = state_obj
+        return record
+
     async def _get_areas(self) -> List[Dict[str, Any]]:
         """Get all areas with entity counts."""
         area_reg = ar.async_get(self.hass)
@@ -302,7 +331,7 @@ class IndexManager:
         # Count entities per area
         area_counts = defaultdict(int)
         for entity in entity_reg.entities.values():
-            if async_should_expose(self.hass, "conversation", entity.entity_id):
+            if self._index_record(entity) is not None:
                 if entity.area_id:
                     area_counts[entity.area_id] += 1
                 # Also check device area
@@ -357,7 +386,7 @@ class IndexManager:
 
         floor_entities = defaultdict(set)
         for entity in entity_reg.entities.values():
-            if not async_should_expose(self.hass, "conversation", entity.entity_id):
+            if self._index_record(entity) is None:
                 continue
 
             area_id = entity.area_id
@@ -408,7 +437,7 @@ class IndexManager:
 
         label_entities = defaultdict(set)
         for entity_entry in entity_reg.entities.values():
-            if not async_should_expose(self.hass, "conversation", entity_entry.entity_id):
+            if self._index_record(entity_entry) is None:
                 continue
 
             device_entry = (
@@ -448,7 +477,7 @@ class IndexManager:
 
         domain_counts = defaultdict(int)
         for entity in entity_reg.entities.values():
-            if async_should_expose(self.hass, "conversation", entity.entity_id):
+            if self._index_record(entity) is not None:
                 domain = entity.entity_id.split('.')[0]
                 domain_counts[domain] += 1
 
@@ -471,13 +500,14 @@ class IndexManager:
         device_classes = defaultdict(lambda: defaultdict(int))
 
         for entity in entity_reg.entities.values():
-            if not async_should_expose(self.hass, "conversation", entity.entity_id):
+            record = self._index_record(entity)
+            if record is None:
                 continue
 
             domain = entity.entity_id.split('.')[0]
 
             # Get device_class from entity attributes
-            state_obj = self.hass.states.get(entity.entity_id)
+            state_obj = record["state_obj"]
             if state_obj and state_obj.attributes:
                 device_class = state_obj.attributes.get('device_class')
                 if device_class:
@@ -505,13 +535,10 @@ class IndexManager:
         people = []
         for entity in entity_reg.entities.values():
             if entity.entity_id.startswith('person.'):
-                if async_should_expose(self.hass, "conversation", entity.entity_id):
-                    # Get friendly name from state
-                    state_obj = self.hass.states.get(entity.entity_id)
-                    name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
-
+                record = self._index_record(entity)
+                if record is not None:
                     people.append({
-                        "name": name,
+                        "name": record["display_name"],
                         # Aliases could be populated via LLM or config
                         # For now, leave empty
                     })
@@ -527,10 +554,9 @@ class IndexManager:
         calendars = []
         for entity in entity_reg.entities.values():
             if entity.entity_id.startswith('calendar.'):
-                if async_should_expose(self.hass, "conversation", entity.entity_id):
-                    state_obj = self.hass.states.get(entity.entity_id)
-                    name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
-                    calendars.append(name)
+                record = self._index_record(entity)
+                if record is not None:
+                    calendars.append(record["display_name"])
 
         calendars.sort()
         _LOGGER.debug("Found %d calendars", len(calendars))
@@ -543,12 +569,11 @@ class IndexManager:
         zones = []
         for entity in entity_reg.entities.values():
             if entity.entity_id.startswith('zone.'):
-                if async_should_expose(self.hass, "conversation", entity.entity_id):
-                    state_obj = self.hass.states.get(entity.entity_id)
-                    name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
+                record = self._index_record(entity)
+                if record is not None:
                     # Exclude 'Home' zone as it's the default
-                    if name.lower() != 'home':
-                        zones.append(name)
+                    if str(record.get("name") or "").lower() != "home":
+                        zones.append(record["display_name"])
 
         zones.sort()
         _LOGGER.debug("Found %d zones", len(zones))
@@ -561,10 +586,9 @@ class IndexManager:
         automations = []
         for entity in entity_reg.entities.values():
             if entity.entity_id.startswith('automation.'):
-                if async_should_expose(self.hass, "conversation", entity.entity_id):
-                    state_obj = self.hass.states.get(entity.entity_id)
-                    name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
-                    automations.append(name)
+                record = self._index_record(entity)
+                if record is not None:
+                    automations.append(record["display_name"])
 
         automations.sort()
         _LOGGER.debug("Found %d automations", len(automations))
@@ -580,10 +604,10 @@ class IndexManager:
         scripts = []
         for entity in entity_reg.entities.values():
             if entity.entity_id.startswith('script.'):
-                if async_should_expose(self.hass, "conversation", entity.entity_id):
+                record = self._index_record(entity)
+                if record is not None:
                     script_id = entity.entity_id.split('.')[1]
-                    state_obj = self.hass.states.get(entity.entity_id)
-                    name = state_obj.name if state_obj else script_id
+                    name = record["display_name"]
 
                     # Get fields from the script entity
                     fields = None
@@ -632,10 +656,9 @@ class IndexManager:
         for entity in entity_reg.entities.values():
             for input_type in input_types:
                 if entity.entity_id.startswith(f'{input_type}.'):
-                    if async_should_expose(self.hass, "conversation", entity.entity_id):
-                        state_obj = self.hass.states.get(entity.entity_id)
-                        name = state_obj.name if state_obj else entity.entity_id.split('.')[1]
-                        helpers[input_type].append(name)
+                    record = self._index_record(entity)
+                    if record is not None:
+                        helpers[input_type].append(record["display_name"])
                         break
 
         # Sort each list and convert to plural keys
@@ -659,11 +682,12 @@ class IndexManager:
         entities_without_device_class = []
 
         for entity in entity_reg.entities.values():
-            if not async_should_expose(self.hass, "conversation", entity.entity_id):
+            record = self._index_record(entity)
+            if record is None:
                 continue
 
             # Get state object to check for device_class
-            state_obj = self.hass.states.get(entity.entity_id)
+            state_obj = record["state_obj"]
             if not state_obj:
                 continue
 

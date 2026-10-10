@@ -102,19 +102,41 @@ from .const import (
     DEFAULT_HERMES_SESSION_KEY,
     DEFAULT_HERMES_MODEL,
     CONF_ENABLE_MEMORY_TOOLS,
+    CONF_ENABLE_PERSONALITY,
+    CONF_MEMORY_AUTO_RETRIEVE,
     DEFAULT_ENABLE_MEMORY_TOOLS,
+    DEFAULT_ENABLE_PERSONALITY,
+    DEFAULT_MEMORY_AUTO_RETRIEVE,
+    ACTION_RESULT_INSTRUCTIONS,
     MEMORY_TECHNICAL_INSTRUCTIONS,
+    PERSONALITY_TECHNICAL_INSTRUCTIONS,
     MIN_REASONING_COMPLETION_TOKENS,
 )
 from .conversation_history import ConversationHistory
 from .ha_compat import build_tool_result_content
 from .localization import get_goodbye_response
+from .stream_tool_calls import finalize_streamed_tool_calls, merge_streamed_tool_fragment
 
 _LOGGER = logging.getLogger(__name__)
 
 MCP_TOOL_CACHE_TTL_SECONDS = 30.0
 MAX_TOOL_RESULT_CHARS = 8000
 MAX_TOOL_RESULT_LINES = 120
+
+
+def _injected_fact_texts(items: list) -> list[str]:
+    """Texts of the facts injected into this turn, for the action safety net."""
+    texts: list[str] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        texts.append(text[:500])
+        if len(texts) >= 8:
+            break
+    return texts
 
 
 class HermesSessionError(Exception):
@@ -255,6 +277,26 @@ class MCPAssistConversationEntity(ConversationEntity):
             self._get_shared_setting(
                 CONF_ENABLE_MEMORY_TOOLS,
                 DEFAULT_ENABLE_MEMORY_TOOLS,
+            )
+        )
+
+    @property
+    def personality_enabled(self) -> bool:
+        """Get whether the personality block is injected and editable."""
+        return bool(
+            self._get_shared_setting(
+                CONF_ENABLE_PERSONALITY,
+                DEFAULT_ENABLE_PERSONALITY,
+            )
+        )
+
+    @property
+    def memory_auto_retrieve_enabled(self) -> bool:
+        """Get whether relevant memories are injected before each reply."""
+        return bool(
+            self._get_shared_setting(
+                CONF_MEMORY_AUTO_RETRIEVE,
+                DEFAULT_MEMORY_AUTO_RETRIEVE,
             )
         )
 
@@ -474,6 +516,8 @@ class MCPAssistConversationEntity(ConversationEntity):
         return (
             self.mcp_port,
             self.search_provider,
+            self.memory_tools_enabled,
+            self.personality_enabled,
         )
 
     def _compact_tool_result_for_llm(self, tool_name: str, content: Any) -> str:
@@ -816,29 +860,6 @@ class MCPAssistConversationEntity(ConversationEntity):
             normalized.append(normalized_call)
         return normalized
 
-    @staticmethod
-    def _normalize_stream_tool_call_index(
-        raw_index: Any,
-        stream_index_offset: int | None,
-    ) -> tuple[int, int]:
-        """Normalize streamed tool-call indexes that start above zero."""
-        try:
-            index = int(raw_index)
-        except (TypeError, ValueError):
-            index = 0
-
-        if stream_index_offset is None:
-            stream_index_offset = index
-
-        return max(0, index - stream_index_offset), stream_index_offset
-
-    @staticmethod
-    def _compact_streamed_tool_calls(
-        tool_calls: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Drop empty streamed tool-call placeholders before execution."""
-        return [tool_call for tool_call in tool_calls if tool_call]
-
     def _format_tool_calls_for_ollama(
         self, tool_calls: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -906,6 +927,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         self, user_input: ConversationInput, conversation_id: str
     ) -> ConversationResult:
         """Process user input with ChatLog tracking."""
+        self._turn_memory_facts = []
         try:
             _LOGGER.debug("Conversation ID: %s", conversation_id)
 
@@ -934,7 +956,9 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.debug("History retrieved: %d turns", len(history))
 
             # Build system prompt with context
-            system_prompt = await self._build_system_prompt_with_context(user_input)
+            system_prompt = await self._build_system_prompt_with_context(
+                user_input, history
+            )
             if self.debug_mode:
                 _LOGGER.info(
                     f"📝 System prompt built, length: {len(system_prompt)} chars"
@@ -1448,9 +1472,11 @@ class MCPAssistConversationEntity(ConversationEntity):
             return "Unknown"
 
     async def _build_system_prompt_with_context(
-        self, user_input: ConversationInput
+        self,
+        user_input: ConversationInput,
+        history: List[Dict[str, Any]] | None = None,
     ) -> str:
-        """Build system prompt with Smart Entity Index."""
+        """Build system prompt with Smart Entity Index, personality, and memories."""
         try:
             # Get base prompts (check options first, then data, then defaults)
             system_prompt = self.entry.options.get(
@@ -1480,13 +1506,25 @@ class MCPAssistConversationEntity(ConversationEntity):
                 "{response_mode}", mode_instructions
             )
 
-            # Inject persistent memory tool instructions
+            technical_prompt += "\n\n" + ACTION_RESULT_INSTRUCTIONS.strip()
+
+            # Inject persistent memory and personality tool instructions
             if self.memory_tools_enabled:
                 technical_prompt += "\n\n" + MEMORY_TECHNICAL_INSTRUCTIONS.strip()
             else:
                 technical_prompt += (
                     "\n\nMemory tools are disabled. Do not call remember_memory, "
                     "recall_memories, or forget_memory."
+                )
+            if self.personality_enabled:
+                technical_prompt += (
+                    "\n\n" + PERSONALITY_TECHNICAL_INSTRUCTIONS.strip()
+                )
+            else:
+                technical_prompt += (
+                    "\n\nPersonality tools are disabled. Do not call "
+                    "view_personality, set_personality_instruction, "
+                    "remove_personality_instruction, or reset_personality."
                 )
 
             # Get Smart Entity Index from IndexManager
@@ -1501,12 +1539,66 @@ class MCPAssistConversationEntity(ConversationEntity):
             # Replace {index} placeholder
             technical_prompt = technical_prompt.replace("{index}", index_json)
 
-            # Combine: system prompt + technical prompt
-            return f"{system_prompt}\n\n{technical_prompt}"
+            personality_block = ""
+            if self.personality_enabled:
+                personality_block = await self._personality_prompt_block()
+
+            facts_block = ""
+            if self.memory_tools_enabled and self.memory_auto_retrieve_enabled:
+                facts_block = await self._remembered_facts_block(
+                    user_input.text, history or []
+                )
+
+            # Personality and retrieved facts sit after the entity index so
+            # they stay next to the conversation instead of being buried in it.
+            parts = [system_prompt, technical_prompt]
+            if personality_block:
+                parts.append(personality_block)
+            if facts_block:
+                parts.append(facts_block)
+            return "\n\n".join(parts)
 
         except Exception as e:
             _LOGGER.error("Error building system prompt: %s", e)
             return "You are a Home Assistant voice assistant. Use MCP tools to control devices."
+
+    async def _personality_prompt_block(self) -> str:
+        """Load the persisted personality block. Failures leave the prompt intact."""
+        try:
+            from .runtime import get_assist_runtime
+
+            return await get_assist_runtime(self.hass).personality.async_prompt_block()
+        except Exception as err:
+            _LOGGER.warning("Could not load personality block: %s", err)
+            return ""
+
+    async def _remembered_facts_block(
+        self, user_text: str, history: List[Dict[str, Any]]
+    ) -> str:
+        """Retrieve relevant memories for this utterance. Never raises."""
+        try:
+            from .memory_rank import format_remembered_facts
+            from .runtime import get_assist_runtime
+
+            previous = history[-1].get("user") if history else None
+            runtime = get_assist_runtime(self.hass)
+            runtime.embeddings.note_profile_endpoint(
+                self.base_url_dynamic, self.api_key or ""
+            )
+            result = await runtime.embeddings.async_retrieve(user_text, previous)
+            if result.mode != "skipped":
+                _LOGGER.info(
+                    "Memory retrieval mode=%s count=%d reason=%s",
+                    result.mode,
+                    len(result.items),
+                    result.reason,
+                )
+            self._turn_memory_facts = _injected_fact_texts(result.items)
+            return format_remembered_facts(result.items)
+        except Exception as err:
+            _LOGGER.warning("Automatic memory retrieval failed: %s", err)
+            self._turn_memory_facts = []
+            return ""
 
     async def _get_home_context(self) -> str:
         """Get lightweight home context (areas and domains) to help LLM with discovery."""
@@ -1667,13 +1759,23 @@ class MCPAssistConversationEntity(ConversationEntity):
             payload = {
                 "jsonrpc": "2.0",
                 "method": "tools/call",
-                "params": {"name": tool_name, "arguments": arguments},
+                "params": {
+                    "name": tool_name,
+                    "arguments": arguments,
+                    "context": {
+                        "conversation_id": getattr(self, "_current_conversation_id", "")
+                        or "",
+                        "injected_facts": list(
+                            getattr(self, "_turn_memory_facts", []) or []
+                        ),
+                    },
+                },
                 "id": request_id,
             }
 
             _LOGGER.debug(f"MCP request: {json.dumps(payload, indent=2)}")
 
-            timeout = aiohttp.ClientTimeout(total=10)
+            timeout = aiohttp.ClientTimeout(total=15)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(f"{mcp_url}/", json=payload) as response:
                     if response.status != 200:
@@ -2231,11 +2333,9 @@ class MCPAssistConversationEntity(ConversationEntity):
         conversation_messages = list(messages)
 
         # Buffers for streaming
-        tool_arg_buffers = {}  # index -> partial JSON string
-        tool_names = {}  # index -> tool name
-        tool_ids = {}  # index -> tool_call_id
         response_text = ""
         sentence_buffer = ""
+        announced_tools = set()
         completed_tools = set()
 
         for iteration in range(self.max_iterations):
@@ -2337,7 +2437,6 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             has_tool_calls = False
             current_tool_calls = []
-            stream_tool_index_offset = None
             current_thought_signature = None  # Track Gemini 3 thought signatures
 
             try:
@@ -2463,144 +2562,38 @@ class MCPAssistConversationEntity(ConversationEntity):
                                 if "tool_calls" in delta:
                                     has_tool_calls = True
                                     for tc in delta["tool_calls"]:
-                                        if "index" in tc:
-                                            idx, stream_tool_index_offset = (
-                                                self._normalize_stream_tool_call_index(
-                                                    tc["index"],
-                                                    stream_tool_index_offset,
-                                                )
+                                        idx = merge_streamed_tool_fragment(
+                                            current_tool_calls, tc
+                                        )
+                                        tool_name = (
+                                            current_tool_calls[idx]
+                                            .get("function", {})
+                                            .get("name")
+                                        )
+                                        arguments = (
+                                            current_tool_calls[idx]
+                                            .get("function", {})
+                                            .get("arguments")
+                                        )
+                                        if tool_name and idx not in announced_tools:
+                                            announced_tools.add(idx)
+                                            _LOGGER.info(
+                                                "🔧 Tool streaming: %s", tool_name
                                             )
-                                        elif "id" in tc or "name" in tc.get(
-                                            "function", {}
+                                        if (
+                                            tool_name
+                                            and isinstance(arguments, str)
+                                            and idx not in completed_tools
                                         ):
-                                            # Index-less fragment starting a new call.
-                                            # Ollama streams complete parallel calls
-                                            # with no index; keying them all to slot 0
-                                            # made later calls overwrite earlier ones
-                                            idx = len(current_tool_calls)
-                                        else:
-                                            # Index-less argument-only fragment
-                                            # continues the call currently streaming
-                                            idx = max(0, len(current_tool_calls) - 1)
-
-                                        # Initialize tool call if new; gap-fill so a
-                                        # sparse index can't raise IndexError
-                                        while idx >= len(current_tool_calls):
-                                            current_tool_calls.append({})
-
-                                        if "id" in tc:
-                                            tool_ids[idx] = tc["id"]
-                                            current_tool_calls[idx]["id"] = tc["id"]
-                                            # Add the required type field
-                                            current_tool_calls[idx]["type"] = "function"
-
-                                        if "function" in tc:
-                                            func = tc["function"]
-                                            if "name" in func:
-                                                tool_names[idx] = func["name"]
-                                                if (
-                                                    "function"
-                                                    not in current_tool_calls[idx]
-                                                ):
-                                                    current_tool_calls[idx][
-                                                        "function"
-                                                    ] = {}
-                                                current_tool_calls[idx]["function"][
-                                                    "name"
-                                                ] = func["name"]
-                                                _LOGGER.info(
-                                                    f"🔧 Tool streaming: {func['name']}"
+                                            completed_tools.add(idx)
+                                            if tool_name == "discover_entities":
+                                                await self._trigger_tts(
+                                                    "Looking for devices..."
                                                 )
-
-                                            if "arguments" in func:
-                                                if (
-                                                    "function"
-                                                    not in current_tool_calls[idx]
-                                                ):
-                                                    current_tool_calls[idx][
-                                                        "function"
-                                                    ] = {}
-
-                                                raw_arguments = func["arguments"]
-                                                if isinstance(raw_arguments, dict):
-                                                    current_tool_calls[idx]["function"][
-                                                        "arguments"
-                                                    ] = self._stringify_tool_arguments(
-                                                        raw_arguments
-                                                    )
-
-                                                    tool_name = tool_names.get(idx)
-                                                    if (
-                                                        tool_name
-                                                        and idx not in completed_tools
-                                                    ):
-                                                        completed_tools.add(idx)
-                                                        if (
-                                                            tool_name
-                                                            == "discover_entities"
-                                                        ):
-                                                            await self._trigger_tts(
-                                                                "Looking for devices..."
-                                                            )
-                                                        elif (
-                                                            tool_name
-                                                            == "perform_action"
-                                                        ):
-                                                            await self._trigger_tts(
-                                                                "Controlling the device..."
-                                                            )
-                                                    continue
-
-                                                if idx not in tool_arg_buffers:
-                                                    tool_arg_buffers[idx] = ""
-                                                tool_arg_buffers[idx] += (
-                                                    self._stringify_tool_arguments(
-                                                        raw_arguments
-                                                    )
+                                            elif tool_name == "perform_action":
+                                                await self._trigger_tts(
+                                                    "Controlling the device..."
                                                 )
-
-                                                # Try to parse arguments
-                                                try:
-                                                    json.loads(
-                                                        tool_arg_buffers[idx]
-                                                    )
-                                                    # Valid JSON - save it
-                                                    if (
-                                                        "function"
-                                                        not in current_tool_calls[idx]
-                                                    ):
-                                                        current_tool_calls[idx][
-                                                            "function"
-                                                        ] = {}
-                                                    current_tool_calls[idx]["function"][
-                                                        "arguments"
-                                                    ] = tool_arg_buffers[idx]
-
-                                                    # Quick feedback for tool execution
-                                                    tool_name = tool_names.get(idx)
-                                                    if (
-                                                        tool_name
-                                                        and idx not in completed_tools
-                                                    ):
-                                                        completed_tools.add(idx)
-                                                        if (
-                                                            tool_name
-                                                            == "discover_entities"
-                                                        ):
-                                                            await self._trigger_tts(
-                                                                "Looking for devices..."
-                                                            )
-                                                        elif (
-                                                            tool_name
-                                                            == "perform_action"
-                                                        ):
-                                                            await self._trigger_tts(
-                                                                "Controlling the device..."
-                                                            )
-
-                                                except json.JSONDecodeError:
-                                                    # Still accumulating arguments
-                                                    pass
 
                             except Exception as e:
                                 _LOGGER.debug(f"Stream parsing: {e}")
@@ -2621,12 +2614,18 @@ class MCPAssistConversationEntity(ConversationEntity):
                 await self._trigger_tts(sentence_buffer.strip())
                 sentence_buffer = ""
 
-            current_tool_calls = self._compact_streamed_tool_calls(current_tool_calls)
+            current_tool_calls = finalize_streamed_tool_calls(current_tool_calls)
 
             # If we got tool calls, execute them
             if has_tool_calls and current_tool_calls:
+                streamed_names = [
+                    call.get("function", {}).get("name", "unknown")
+                    for call in current_tool_calls
+                ]
                 _LOGGER.info(
-                    f"⚡ Executing {len(current_tool_calls)} streamed tool calls"
+                    "⚡ Executing %d streamed tool calls: %s",
+                    len(current_tool_calls),
+                    ", ".join(streamed_names),
                 )
                 if self.debug_mode:
                     _LOGGER.debug(
@@ -2696,9 +2695,7 @@ class MCPAssistConversationEntity(ConversationEntity):
                 response_text = (
                     ""  # Clear accumulated text since it was just pre-tool narration
                 )
-                tool_arg_buffers.clear()
-                tool_names.clear()
-                tool_ids.clear()
+                announced_tools.clear()
                 completed_tools.clear()
 
                 # Continue to get next response after tools

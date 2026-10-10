@@ -193,6 +193,8 @@ Example - "Set living room temperature to 22":
   1. discover_entities(domain="climate", area="Living Room")  # Find the thermostat
   2. perform_action(domain="climate", action="set_temperature", target={{"entity_id": "climate.living_room"}}, data={{"temperature": 22}})  # Set the temperature
 
+If a remembered fact describes a setting for the requested device, pass those values in perform_action.data. Examples: brightness_pct 50, color_temp_kelvin 4000, rgb_color, temperature, position. Do not send an activation such as turn_on with empty data when such a fact applies.
+
 **Never skip the perform_action step.** Discovering an entity does not control it - you must call perform_action to execute the action.
 
 ## Scripts (use run_script tool)
@@ -225,6 +227,7 @@ For ANY device request:
 - Short, concise replies in plain text only
 - Use Friendly Names (e.g., "Living Room Light"), never entity IDs
 - Use natural language for states ("on" → "turned on", "home" → "at home")
+- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed: say that, and when the result asks for setting values, call perform_action again with those values in data.
 
 {response_mode}
 
@@ -240,10 +243,83 @@ Current date: {date}"""
 CONF_ENABLE_MEMORY_TOOLS = "enable_memory_tools"
 DEFAULT_ENABLE_MEMORY_TOOLS = False
 
+# Personality block and automatic retrieval. Missing keys use these defaults,
+# so an existing install keeps its memories and gains the new behaviour.
+CONF_ENABLE_PERSONALITY = "enable_personality"
+DEFAULT_ENABLE_PERSONALITY = True
+CONF_MEMORY_AUTO_RETRIEVE = "memory_auto_retrieve"
+DEFAULT_MEMORY_AUTO_RETRIEVE = True
+CONF_MEMORY_TOP_K = "memory_top_k"
+DEFAULT_MEMORY_TOP_K = 4
+CONF_MEMORY_SIMILARITY_THRESHOLD = "memory_similarity_threshold"
+# Tuned on sergeyzh/rubert-tiny-turbo. Related short phrases land around
+# 0.83-0.95 and unrelated ones around 0.60-0.74. Raise it if the wrong
+# fact is injected. multilingual-e5-small may need a different value.
+DEFAULT_MEMORY_SIMILARITY_THRESHOLD = 0.78
+# Shown to the model as possible duplicates. It decides add, update, or noop.
+# 0.65 is below the unrelated band on rubert-tiny-turbo (~0.60-0.70) enough to
+# surface "Олега зовут хозяином" (0.90) next to the name fact without writing it.
+CONF_MEMORY_CANDIDATE_THRESHOLD = "memory_candidate_threshold"
+DEFAULT_MEMORY_CANDIDATE_THRESHOLD = 0.65
+# One-time and explicit cleanup only. Name paraphrases score 0.92.
+# "Олега зовут хозяином" vs the name fact scores 0.90 and must not be merged.
+# The two bright-white-light values score 0.82 and wait for the model.
+CONF_MEMORY_AUTO_MERGE_THRESHOLD = "memory_auto_merge_threshold"
+DEFAULT_MEMORY_AUTO_MERGE_THRESHOLD = 0.91
+# Semantic forget. "забудь всё про пиратов" vs "разговаривать как пират" = 0.81.
+# Inflection also matches by stem below this score.
+CONF_MEMORY_FORGET_THRESHOLD = "memory_forget_threshold"
+DEFAULT_MEMORY_FORGET_THRESHOLD = 0.80
+CONF_MEMORY_INCLUDE_LAST_TURN = "memory_include_last_turn"
+DEFAULT_MEMORY_INCLUDE_LAST_TURN = True
+CONF_EMBEDDING_PROVIDER = "embedding_provider"
+EMBEDDING_PROVIDER_LOCAL = "local"
+EMBEDDING_PROVIDER_OPENAI = "openai"
+DEFAULT_EMBEDDING_PROVIDER = EMBEDDING_PROVIDER_LOCAL
+CONF_LOCAL_EMBEDDING_MODEL = "local_embedding_model"
+DEFAULT_LOCAL_EMBEDDING_MODEL = "sergeyzh/rubert-tiny-turbo"
+LOCAL_EMBEDDING_MODEL_E5 = "intfloat/multilingual-e5-small"
+CONF_EMBEDDING_MODEL = "embedding_model"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+CONF_EMBEDDING_BASE_URL = "embedding_base_url"
+DEFAULT_EMBEDDING_BASE_URL = ""
+
 MEMORY_TECHNICAL_INSTRUCTIONS = """
 Memory tools are enabled.
-- Use remember_memory only when the user explicitly asks you to remember something.
-- Use recall_memories for stored facts or preferences.
-- Use forget_memory when the user asks to remove or update stored memory.
-- Memories persist until the user explicitly asks to forget them; there is no automatic expiry.
+- Store a fact or preference with remember_memory only when the user explicitly asks you to remember something about people, the home, devices, schedules, or favourites.
+- Do not use remember_memory for speaking style, persona, tone, or how to address the user. Those go in the personality block with set_personality_instruction.
+- Relevant memories are injected automatically as "Remembered facts" when they match the current request. Use them. Call recall_memories only when the user asks what you remember, or when the injected facts are not enough.
+- Use forget_memory when the user asks you to forget, delete, or stop something you stored. Russian inflections match: "пиратов" matches a memory that says "пират".
+- When the user says to forget everything about a subject ("забудь всё про ...", "forget everything about ..."), set forget_all_matches to true.
+- forget_memory also searches the personality block when you do not have an id. If a style lives there, it is removed too.
+- If the tool says DELETED NOTHING, tell the user that nothing was removed. Do not claim you forgot it.
+- Call remember_memory once, with the fact only. Do not pass mode or memory_id. The server stores a new fact, updates the same fact, or says it is already stored.
+- If remember_memory says NOOP or UPDATED or Stored, stop. Do not call it again.
+- If it says NOT STORED, nothing was written. Do not call mode=add. A category such as user_name is not a memory_id. Copy an id from the list only when you are updating that exact row. "Олега зовут хозяином" is not the same fact as "Меня зовут Олег".
+- Memories persist until the user explicitly asks to forget them. There is no automatic expiry.
+- If a remembered fact describes a setting for the requested device, pass those values in perform_action.data. Do not send an activation such as turn_on with empty data when such a fact applies.
+- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed.
+"""
+
+ACTION_RESULT_INSTRUCTIONS = """
+Device action results:
+- If a remembered fact describes a setting for the requested device, pass those values in perform_action.data. Do not send an activation such as turn_on with empty data when such a fact applies.
+- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed: say that, and when the result asks for setting values, call perform_action again with those values in data.
+"""
+
+PERFORM_ACTION_DATA_DESCRIPTION = (
+    "Service data. Include every setting the user or a remembered fact asked for. "
+    'Examples: {"brightness_pct": 50, "color_temp_kelvin": 4000}, '
+    '{"rgb_color": [255, 180, 80]}, {"temperature": 21}, {"position": 30}.'
+)
+
+PERSONALITY_TECHNICAL_INSTRUCTIONS = """
+Personality tools are enabled.
+- Speaking style, persona, tone, and forms of address live in the personality block and are applied on every later turn.
+- Use view_personality to read it, set_personality_instruction to add or replace one instruction, remove_personality_instruction to delete one, and reset_personality to clear it.
+- A request such as "talk to me like a pirate" or "говори со мной как пират" updates the personality block. It is not a memory.
+- If the user says to forget or stop a speaking style, call remove_personality_instruction. When you are not sure which store holds it, that tool also searches memories.
+- Call set_personality_instruction once, with the instruction only. The server decides whether it is new, an update, or already stored. If it says NOT STORED, do not call mode=add and do not invent an instruction_id.
+- If the user replaces a style, replace the existing instruction or reset the block. Do not keep contradictory styles.
+- If the tool says nothing was removed, do not tell the user that you forgot it.
 """
