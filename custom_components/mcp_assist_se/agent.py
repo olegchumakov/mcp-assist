@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, Literal
 
 import aiohttp
 
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
 from homeassistant.components import conversation
 from homeassistant.components.conversation import (
     ConversationEntity,
@@ -116,11 +118,41 @@ from .conversation_history import ConversationHistory
 from .ha_compat import build_tool_result_content
 from .localization import get_goodbye_response
 from .stream_tool_calls import finalize_streamed_tool_calls, merge_streamed_tool_fragment
+from .round_trips import can_finish_without_followup, tool_call_names
 
 _LOGGER = logging.getLogger(__name__)
 
 MCP_TOOL_CACHE_TTL_SECONDS = 30.0
 MAX_TOOL_RESULT_CHARS = 8000
+
+
+class _SharedSession:
+    """Borrow Home Assistant's shared aiohttp session for one request scope.
+
+    Reusing the shared session keeps TCP/TLS connections to the LLM provider
+    alive between tool-calling rounds instead of opening a new connection for
+    every request. Used as ``async with``; it never closes the shared session.
+    """
+
+    def __init__(self, session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout) -> None:
+        self._session = session
+        self._timeout = timeout
+
+    def post(self, *args: Any, **kwargs: Any):
+        kwargs.setdefault("timeout", self._timeout)
+        return self._session.post(*args, **kwargs)
+
+    def get(self, *args: Any, **kwargs: Any):
+        kwargs.setdefault("timeout", self._timeout)
+        return self._session.get(*args, **kwargs)
+
+    async def __aenter__(self) -> "_SharedSession":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
 MAX_TOOL_RESULT_LINES = 120
 
 
@@ -1129,7 +1161,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         )
 
         timeout = aiohttp.ClientTimeout(total=self.timeout)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with self._llm_session(timeout) as session:
             async with session.post(url, headers=headers, json=payload) as resp:
                 if resp.status != 200:
                     await self._raise_hermes_error(resp)
@@ -1187,7 +1219,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         )
 
         timeout = aiohttp.ClientTimeout(total=self.timeout)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with self._llm_session(timeout) as session:
             async with session.post(url, headers=headers, json=payload) as resp:
                 if resp.status != 200:
                     await self._raise_hermes_error(resp)
@@ -2039,6 +2071,34 @@ class MCPAssistConversationEntity(ConversationEntity):
             _LOGGER.debug(f"TTS not available or failed: {e}")
             # Don't fail the whole request if TTS fails
 
+    def _llm_session(self, timeout: aiohttp.ClientTimeout) -> _SharedSession:
+        """Shared, keep-alive HTTP session for LLM provider requests."""
+        return _SharedSession(async_get_clientsession(self.hass), timeout)
+
+    async def _finish_with_bookkeeping_tools(
+        self, tool_calls: List[Dict[str, Any]]
+    ) -> None:
+        """Run non-informational tool calls whose results the model does not need."""
+        self._record_tool_calls_to_chatlog(tool_calls)
+        tool_results = await self._execute_tool_calls(tool_calls)
+        for idx, result in enumerate(tool_results):
+            if idx < len(tool_calls):
+                tc = tool_calls[idx]
+                tool_call_id = result.get("tool_call_id", tc.get("id", "unknown"))
+                tool_name = tc.get("function", {}).get("name", "unknown")
+                try:
+                    tool_result_data = json.loads(result.get("content", "{}"))
+                except (TypeError, ValueError):
+                    tool_result_data = {"result": result.get("content", "")}
+                self._record_tool_result_to_chatlog(
+                    tool_call_id, tool_name, tool_result_data
+                )
+        _LOGGER.info(
+            "⏭️ Final text came with only bookkeeping tools (%s); "
+            "skipping the extra LLM round",
+            ", ".join(tool_call_names(tool_calls)),
+        )
+
     async def _execute_tool_calls(
         self, tool_calls: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
@@ -2137,7 +2197,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
         try:
             timeout = aiohttp.ClientTimeout(total=self.timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with self._llm_session(timeout) as session:
                 url = f"{self.base_url_dynamic}/v1/chat/completions"
                 headers = self._get_auth_headers()
                 async with session.post(url, headers=headers, json=payload) as response:
@@ -2441,7 +2501,7 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             try:
                 timeout = aiohttp.ClientTimeout(total=self.timeout)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with self._llm_session(timeout) as session:
                     # Use appropriate endpoint based on server type
                     if self.server_type == SERVER_TYPE_OLLAMA:
                         url = f"{self.base_url_dynamic}/api/chat"
@@ -2616,6 +2676,15 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             current_tool_calls = finalize_streamed_tool_calls(current_tool_calls)
 
+            # Final text plus only bookkeeping tools: run them and finish now
+            if (
+                has_tool_calls
+                and current_tool_calls
+                and can_finish_without_followup(response_text, current_tool_calls)
+            ):
+                await self._finish_with_bookkeeping_tools(current_tool_calls)
+                return response_text
+
             # If we got tool calls, execute them
             if has_tool_calls and current_tool_calls:
                 streamed_names = [
@@ -2781,7 +2850,7 @@ class MCPAssistConversationEntity(ConversationEntity):
             clean_payload = clean_for_json_http(payload)
 
             timeout = aiohttp.ClientTimeout(total=self.timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with self._llm_session(timeout) as session:
                 # Use appropriate endpoint based on server type
                 if self.server_type == SERVER_TYPE_OLLAMA:
                     url = f"{self.base_url_dynamic}/api/chat"
@@ -2847,6 +2916,12 @@ class MCPAssistConversationEntity(ConversationEntity):
 
                         # Preserve thought_signature in tool_calls for Gemini 3
                         # It should already be there from the response, just keep it
+
+                        # Final text plus only bookkeeping tools: run them and finish now
+                        final_text = (message.get("content") or "").strip()
+                        if can_finish_without_followup(final_text, tool_calls):
+                            await self._finish_with_bookkeeping_tools(tool_calls)
+                            return final_text
 
                         assistant_msg = {
                             "role": "assistant",

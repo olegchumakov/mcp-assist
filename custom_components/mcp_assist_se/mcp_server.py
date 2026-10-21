@@ -88,6 +88,7 @@ from .store_decision import complete_store_decision, openai_chat_url
 from .memory_settings import read_memory_settings
 from .runtime import get_assist_runtime
 from .discovery import EntityDiscovery
+from .state_summary import format_display_name, summarize_state
 from .domain_registry import (
     validate_domain_action,
     get_supported_domains,
@@ -1783,7 +1784,7 @@ class MCPServer:
         tools = [
             {
                 "name": "discover_entities",
-                "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, or current state. Use this to discover what devices are available before trying to control them.",
+                "description": "Find and list Home Assistant entities by criteria like area, floor, label, type, domain, device_class, or current state. Use this to discover what devices are available before trying to control them. Each result already includes the current state with its unit and key attributes (brightness, color temperature, temperatures, position, volume, battery), so you usually do not need get_entity_details afterwards.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -1843,7 +1844,7 @@ class MCPServer:
             },
             {
                 "name": "get_entity_details",
-                "description": "Get current state, attributes, area, floor, and labels of specific entities",
+                "description": "Get the full state, all attributes, area, floor, and labels of specific entities. Only needed when discover_entities results do not already contain what you need.",
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -2263,6 +2264,19 @@ class MCPServer:
         # Format results based on whether it's smart discovery or general
         return self._format_discovery_results(entities, args)
 
+    def _display_name(self, entity: Dict[str, Any]) -> str:
+        """Entity name plus its aliases, so the model can tell entities apart."""
+        state_obj = self.hass.states.get(entity.get("entity_id", ""))
+        name = entity.get("name") or (state_obj.name if state_obj else "") or entity.get("entity_id", "")
+        return format_display_name(name, entity.get("aliases"))
+
+    def _live_state_text(self, entity: Dict[str, Any]) -> str:
+        """Current state with unit and key attributes, read live from HA."""
+        state_obj = self.hass.states.get(entity.get("entity_id", ""))
+        if state_obj is None:
+            return summarize_state(entity.get("state"), entity.get("attributes"))
+        return summarize_state(state_obj.state, state_obj.attributes)
+
     def _format_discovery_results(
         self, entities: List[Dict[str, Any]], args: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -2328,7 +2342,7 @@ class MCPServer:
                         else ""
                     )
                     text_parts.append(
-                        f"  • {entity['entity_id']}: {entity['name']} - {entity['state']}{type_desc}{location_text}{labels}"
+                        f"  • {entity['entity_id']}: {self._display_name(entity)} - {self._live_state_text(entity)}{type_desc}{location_text}{labels}"
                     )
 
             # Group related entities by category
@@ -2356,7 +2370,7 @@ class MCPServer:
                             else ""
                         )
                         text_parts.append(
-                            f"    • {entity['entity_id']}: {entity['state']}{location_text}{labels}"
+                            f"    • {entity['entity_id']}: {self._display_name(entity)} - {self._live_state_text(entity)}{location_text}{labels}"
                         )
 
             return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
@@ -2365,14 +2379,14 @@ class MCPServer:
             text_parts = [f"Found {len(entities)} entities:"]
 
             for entity in entities:
-                detail_parts = [f"State: {entity['state']}"]
+                detail_parts = [f"State: {self._live_state_text(entity)}"]
                 detail_parts.append(f"Area: {entity.get('area', 'None')}")
                 if entity.get("floor"):
                     detail_parts.append(f"Floor: {entity['floor']}")
                 if entity.get("labels"):
                     detail_parts.append(f"Labels: {', '.join(entity['labels'])}")
                 text_parts.append(
-                    f"- {entity['entity_id']}: {entity['name']} ({', '.join(detail_parts)})"
+                    f"- {entity['entity_id']}: {self._display_name(entity)} ({', '.join(detail_parts)})"
                 )
 
             return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
