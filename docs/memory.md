@@ -1,6 +1,6 @@
 # Memory and personality
 
-MCP Assist SE 0.23.0 keeps two different kinds of long-term context.
+MCP Assist SE 0.23.1 keeps two different kinds of long-term context.
 
 ## Facts
 

@@ -29,7 +29,22 @@ except ImportError:  # pragma: no cover - older Home Assistant versions
 from .action_verify import listing_disposition, prepare_listed_entity
 from .const import MAX_ENTITIES_PER_DISCOVERY
 from .ha_compat import devices_in_area
-from .text_match import any_key_equal, key_contains, keys_equal
+from contextvars import ContextVar
+
+from .text_match import (
+    any_key_equal,
+    best_typo_match,
+    key_contains,
+    keys_equal,
+    typo_contains,
+)
+
+# Notes about typo-tolerant lookups made while serving the current tool call
+# (fuzzy matches taken, or ambiguous names that were not guessed). Awaiting a
+# coroutine keeps the caller's context, so the tool handler reads them back.
+_RESOLUTION_HINTS: ContextVar[list[str] | None] = ContextVar(
+    "mcp_assist_se_resolution_hints", default=None
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -115,6 +130,9 @@ class SmartDiscovery:
             inferred_type: Inferred entity type from the index (e.g., 'person_detection')
                           Looks up the pattern from the index and applies it
         """
+        if _RESOLUTION_HINTS.get() is None:
+            self.begin_resolution_hints()
+
         # Detect query type and intent
         query_type = self._detect_query_type(
             entity_type, area or floor, domain, state, name_contains
@@ -243,7 +261,9 @@ class SmartDiscovery:
         # - Has no person entity
         return has_pet_entities and not has_person_entity and not has_device_tracker
 
-    def _resolve_area_entry(self, area_name: str, area_registry: Any) -> Any:
+    def _resolve_area_entry(
+        self, area_name: str, area_registry: Any, fuzzy: bool = True
+    ) -> Any:
         """Resolve an area by name or alias."""
         if not area_name:
             return None
@@ -267,9 +287,18 @@ class SmartDiscovery:
             if any_key_equal(area_name, aliases):
                 return area_entry
 
-        return None
+        if not fuzzy:
+            return None
+        return self._typo_fallback(
+            "area",
+            area_name,
+            area_registry.async_list_areas(),
+            lambda entry: [entry.name, *sorted(getattr(entry, "aliases", set()) or set())],
+        )
 
-    def _resolve_floor_entry(self, floor_name: str, floor_registry: Any) -> Any:
+    def _resolve_floor_entry(
+        self, floor_name: str, floor_registry: Any, fuzzy: bool = True
+    ) -> Any:
         """Resolve a floor by name or alias."""
         if not floor_name or floor_registry is None:
             return None
@@ -293,7 +322,14 @@ class SmartDiscovery:
             if any_key_equal(floor_name, aliases):
                 return floor_entry
 
-        return None
+        if not fuzzy:
+            return None
+        return self._typo_fallback(
+            "floor",
+            floor_name,
+            floor_registry.async_list_floors(),
+            lambda entry: [entry.name, *sorted(getattr(entry, "aliases", set()) or set())],
+        )
 
     def _resolve_label_entry(self, label_name: str, label_registry: Any) -> Any:
         """Resolve a label by name."""
@@ -310,6 +346,69 @@ class SmartDiscovery:
             if keys_equal(label_entry.name, label_name):
                 return label_entry
 
+        return self._typo_fallback(
+            "label",
+            label_name,
+            label_registry.async_list_labels(),
+            lambda entry: [entry.name],
+        )
+
+    def _resolve_area_or_floor(
+        self, name: str, area_registry: Any, floor_registry: Any
+    ) -> Tuple[Any, Any]:
+        """Resolve a place name to (area, None) or (None, floor).
+
+        Exact (normalized) matches on areas and floors are tried before any
+        typo-tolerant match, so a typo never overrides an exact hit.
+        """
+        area_entry = self._resolve_area_entry(name, area_registry, fuzzy=False)
+        if area_entry:
+            return area_entry, None
+        floor_entry = self._resolve_floor_entry(name, floor_registry, fuzzy=False)
+        if floor_entry:
+            return None, floor_entry
+        area_entry = self._resolve_area_entry(name, area_registry)
+        if area_entry:
+            return area_entry, None
+        return None, self._resolve_floor_entry(name, floor_registry)
+
+    @staticmethod
+    def begin_resolution_hints() -> None:
+        """Start collecting typo-tolerance notes for the current tool call."""
+        _RESOLUTION_HINTS.set([])
+
+    @staticmethod
+    def resolution_hints() -> List[str]:
+        """Notes collected since begin_resolution_hints()."""
+        return list(_RESOLUTION_HINTS.get() or [])
+
+    @staticmethod
+    def _add_resolution_hint(hint: str) -> None:
+        hints = _RESOLUTION_HINTS.get()
+        if hints is not None and hint not in hints:
+            hints.append(hint)
+
+    def _typo_fallback(
+        self, kind: str, query: str, entries: Any, names: Any
+    ) -> Any:
+        """Typo-tolerant lookup used only after exact matching found nothing."""
+        result = best_typo_match(query, list(entries or []), names)
+        if result.match is not None:
+            matched_name = result.candidates[0]
+            _LOGGER.debug("Typo-tolerant %s match: %r -> %r", kind, query, matched_name)
+            self._add_resolution_hint(
+                f"No {kind} is named '{query}'; used the closest {kind} '{matched_name}'."
+            )
+            return result.match
+        if result.ambiguous:
+            _LOGGER.debug(
+                "Ambiguous typo-tolerant %s match for %r: %s", kind, query, result.candidates
+            )
+            self._add_resolution_hint(
+                f"No {kind} is named '{query}'. Did you mean one of: "
+                + ", ".join(f"'{name}'" for name in result.candidates)
+                + "? Retry with the exact name."
+            )
         return None
 
     def _get_label_names(self, label_ids: Set[str], label_registry: Any) -> List[str]:
@@ -451,6 +550,37 @@ class SmartDiscovery:
             value and key_contains(value, search_term)
             for value in search_values
         )
+
+    def _entity_typo_distance(
+        self,
+        search_term: str,
+        state_obj: Any,
+        entity_entry: Any,
+        entity_context: Dict[str, Any],
+    ) -> Optional[int]:
+        """Best typo distance between the search term and the entity's names."""
+        search_values = {
+            state_obj.name,
+            state_obj.attributes.get("friendly_name", ""),
+            entity_context.get("area"),
+            entity_context.get("floor"),
+            entity_context.get("device"),
+            entity_context.get("device_name"),
+            entity_context.get("device_name_by_user"),
+        }
+        search_values.update(self._get_entity_aliases(entity_entry))
+        search_values.update(entity_context.get("area_aliases", []))
+        search_values.update(entity_context.get("floor_aliases", []))
+        search_values.update(entity_context.get("device_aliases", []))
+        search_values.update(entity_context.get("labels", []))
+        distances = [
+            distance
+            for distance in (
+                typo_contains(value, search_term) for value in search_values if value
+            )
+            if distance is not None
+        ]
+        return min(distances) if distances else None
 
     async def _discover_person_entities(
         self, name: str, limit: int
@@ -648,12 +778,13 @@ class SmartDiscovery:
                 return []
             area = area[0]  # Use first area
 
-        # Find area by name
-        area_entry = self._resolve_area_entry(area, area_registry)
+        # Find area by name (or a floor with that name)
+        area_entry, floor_entry = self._resolve_area_or_floor(
+            area, area_registry, floor_registry
+        )
         area_id = area_entry.id if area_entry else None
 
         if not area_id:
-            floor_entry = self._resolve_floor_entry(area, floor_registry)
             if floor_entry:
                 return await self._discover_general_entities(
                     entity_type=None,
@@ -771,11 +902,16 @@ class SmartDiscovery:
         floor_id = None
         label_id = None
         if area:
-            area_entry = self._resolve_area_entry(area, area_registry)
+            if floor:
+                area_entry = self._resolve_area_entry(area, area_registry)
+                floor_entry = None
+            else:
+                area_entry, floor_entry = self._resolve_area_or_floor(
+                    area, area_registry, floor_registry
+                )
             if area_entry:
                 area_id = area_entry.id
             elif not floor:
-                floor_entry = self._resolve_floor_entry(area, floor_registry)
                 if floor_entry:
                     floor_id = floor_entry.floor_id
                 else:
@@ -813,7 +949,56 @@ class SmartDiscovery:
 
         limit = min(limit, max_limit)
 
-        # Search through all entities
+        entities = self._scan_general_entities(
+            entity_type, domain, state, name_contains, limit, device_class,
+            name_pattern, area_id, floor_id, label_id, entity_registry,
+            device_registry, area_registry, floor_registry, label_registry,
+            fuzzy=False,
+        )
+        if not entities and name_contains:
+            entities = self._scan_general_entities(
+                entity_type, domain, state, name_contains, limit, device_class,
+                name_pattern, area_id, floor_id, label_id, entity_registry,
+                device_registry, area_registry, floor_registry, label_registry,
+                fuzzy=True,
+            )
+            if entities:
+                self._add_resolution_hint(
+                    f"Nothing contains '{name_contains}' exactly; showing the "
+                    "closest names (typo-tolerant match)."
+                )
+
+        _LOGGER.debug(
+            f"General discovery found {len(entities)} entities with filters: "
+            f"type={entity_type}, area={area}, floor={floor}, label={label}, "
+            f"domain={domain}, state={state}, name_contains={name_contains}"
+        )
+
+        return entities
+
+    def _scan_general_entities(
+        self,
+        entity_type: Optional[str],
+        domain: Optional[str],
+        state: Optional[str],
+        name_contains: Optional[str],
+        limit: int,
+        device_class: Optional[Union[str, List[str]]],
+        name_pattern: Optional[str],
+        area_id: Optional[str],
+        floor_id: Optional[str],
+        label_id: Optional[str],
+        entity_registry: Any,
+        device_registry: Any,
+        area_registry: Any,
+        floor_registry: Any,
+        label_registry: Any,
+        fuzzy: bool,
+    ) -> List[Dict[str, Any]]:
+        """One filtering pass; with fuzzy=True, name_contains is typo-tolerant
+        and only the entities with the smallest distance are kept."""
+        entities: List[Dict[str, Any]] = []
+        distances: List[int] = []
         for state_obj in self.hass.states.async_all():
             entity_id = state_obj.entity_id
 
@@ -847,9 +1032,17 @@ class SmartDiscovery:
             )
 
             # Enhanced name search - search entity_id, friendly name, AND aliases
+            distance = 0
             if name_contains:
                 search_term = name_contains.lower()
-                if not self._entity_matches_search_term(
+                if fuzzy:
+                    typo = self._entity_typo_distance(
+                        search_term, state_obj, entity_entry, entity_context
+                    )
+                    if typo is None:
+                        continue
+                    distance = typo
+                elif not self._entity_matches_search_term(
                     search_term,
                     state_obj,
                     entity_entry,
@@ -899,17 +1092,17 @@ class SmartDiscovery:
                 continue
 
             entities.append(entity_info)
+            distances.append(distance)
 
-            # Stop if we hit the limit
-            if len(entities) >= limit:
+            # Stop if we hit the limit (a fuzzy pass ranks everything first)
+            if not fuzzy and len(entities) >= limit:
                 break
 
-        _LOGGER.debug(
-            f"General discovery found {len(entities)} entities with filters: "
-            f"type={entity_type}, area={area}, floor={floor}, label={label}, "
-            f"domain={domain}, state={state}, name_contains={name_contains}"
-        )
-
+        if fuzzy and entities:
+            best = min(distances)
+            entities = [
+                entity for entity, d in zip(entities, distances) if d == best
+            ][:limit]
         return entities
 
     def _create_entity_info(

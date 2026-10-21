@@ -2239,6 +2239,7 @@ class MCPServer:
             args=args,
         )
 
+        self.discovery.begin_resolution_hints()
         entities = await self.discovery.discover_entities(
             entity_type=args.get("entity_type"),
             area=args.get("area"),
@@ -2262,7 +2263,17 @@ class MCPServer:
         )
 
         # Format results based on whether it's smart discovery or general
-        return self._format_discovery_results(entities, args)
+        result = self._format_discovery_results(entities, args)
+        return self._with_resolution_hints(result)
+
+    def _with_resolution_hints(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Prefix typo-tolerance notes (fuzzy match used, or ambiguity) to a result."""
+        hints = self.discovery.resolution_hints()
+        content = result.get("content") or []
+        if hints and content and content[0].get("type") == "text":
+            note = "\n".join(f"Note: {hint}" for hint in hints)
+            content[0]["text"] = f"{note}\n{content[0]['text']}"
+        return result
 
     def _display_name(self, entity: Dict[str, Any]) -> str:
         """Entity name plus its aliases, so the model can tell entities apart."""
@@ -3198,7 +3209,13 @@ class MCPServer:
             area_entities = []
             for area_id in area_ids:
                 # Get entities in this area
+                self.discovery.begin_resolution_hints()
                 entities = await self.discovery.get_entities_by_area(area_id)
+                if not entities:
+                    hints = self.discovery.resolution_hints()
+                    if hints:
+                        # Ambiguous typo: never act on a guessed area
+                        raise ValueError(" ".join(hints))
                 area_entities.extend([e["entity_id"] for e in entities])
                 _LOGGER.debug(f"Found {len(entities)} entities in area '{area_id}'")
 
