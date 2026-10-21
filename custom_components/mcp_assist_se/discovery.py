@@ -29,6 +29,7 @@ except ImportError:  # pragma: no cover - older Home Assistant versions
 from .action_verify import listing_disposition, prepare_listed_entity
 from .const import MAX_ENTITIES_PER_DISCOVERY
 from .ha_compat import devices_in_area
+from .text_match import any_key_equal, key_contains, keys_equal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -259,12 +260,11 @@ class SmartDiscovery:
             if area_matches:
                 return area_matches[0]
 
-        area_name_lower = area_name.casefold()
         for area_entry in area_registry.async_list_areas():
-            if area_entry.name.casefold() == area_name_lower:
+            if keys_equal(area_entry.name, area_name):
                 return area_entry
             aliases = getattr(area_entry, "aliases", set()) or set()
-            if any(alias.casefold() == area_name_lower for alias in aliases):
+            if any_key_equal(area_name, aliases):
                 return area_entry
 
         return None
@@ -286,12 +286,11 @@ class SmartDiscovery:
             if floor_matches:
                 return floor_matches[0]
 
-        floor_name_lower = floor_name.casefold()
         for floor_entry in floor_registry.async_list_floors():
-            if floor_entry.name.casefold() == floor_name_lower:
+            if keys_equal(floor_entry.name, floor_name):
                 return floor_entry
             aliases = getattr(floor_entry, "aliases", set()) or set()
-            if any(alias.casefold() == floor_name_lower for alias in aliases):
+            if any_key_equal(floor_name, aliases):
                 return floor_entry
 
         return None
@@ -307,9 +306,8 @@ class SmartDiscovery:
             if label_entry:
                 return label_entry
 
-        label_name_lower = label_name.casefold()
         for label_entry in label_registry.async_list_labels():
-            if label_entry.name.casefold() == label_name_lower:
+            if keys_equal(label_entry.name, label_name):
                 return label_entry
 
         return None
@@ -450,7 +448,7 @@ class SmartDiscovery:
         search_values.update(entity_context.get("labels", []))
 
         return any(
-            value and search_term in value.casefold()
+            value and key_contains(value, search_term)
             for value in search_values
         )
 
@@ -500,7 +498,7 @@ class SmartDiscovery:
             # Also check friendly name and aliases
             if not matched:
                 # Check friendly name
-                if name_lower in state_obj.name.lower():
+                if key_contains(state_obj.name, name_lower):
                     entity_info = self._create_entity_info(state_obj)
                     if entity_info is not None:
                         results["related_entities"]["other"].append(entity_info)
@@ -511,7 +509,7 @@ class SmartDiscovery:
                     entity_aliases = self._get_entity_aliases(entity_entry)
                     if entity_aliases:
                         for alias in entity_aliases:
-                            if name_lower in alias.lower():
+                            if key_contains(alias, name_lower):
                                 entity_info = self._create_entity_info(state_obj)
                                 if entity_info is None:
                                     break
@@ -567,7 +565,7 @@ class SmartDiscovery:
             # Also check friendly name and aliases
             if not matched:
                 # Check friendly name
-                if name_lower in state_obj.name.lower():
+                if key_contains(state_obj.name, name_lower):
                     entity_info = self._create_entity_info(state_obj)
                     if entity_info is not None:
                         results["related_entities"]["other"].append(entity_info)
@@ -578,7 +576,7 @@ class SmartDiscovery:
                     entity_aliases = self._get_entity_aliases(entity_entry)
                     if entity_aliases:
                         for alias in entity_aliases:
-                            if name_lower in alias.lower():
+                            if key_contains(alias, name_lower):
                                 entity_info = self._create_entity_info(state_obj)
                                 if entity_info is None:
                                     break
@@ -1224,7 +1222,13 @@ class SmartDiscovery:
         entities = []
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
-        area_entry = ar.async_get(self.hass).async_get_area(area_id)
+        area_registry = ar.async_get(self.hass)
+        area_entry = area_registry.async_get_area(area_id)
+        if area_entry is None:
+            # Models sometimes pass an area name or alias instead of its id
+            area_entry = self._resolve_area_entry(area_id, area_registry)
+            if area_entry is not None:
+                area_id = area_entry.id
         area_name = area_entry.name if area_entry else ""
 
         for state in self.hass.states.async_all():
