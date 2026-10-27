@@ -31,6 +31,15 @@ from homeassistant.helpers import (
 )
 from homeassistant.util import dt as dt_util
 
+from .speaker_tag import NonceCache
+from .access_control import (
+    decide_turn,
+    filter_index,
+    grant_to_payload,
+    is_unrestricted,
+    load_access_config,
+)
+from .access_hass import snapshot_from_hass
 from .const import (
     DOMAIN,
     CONF_PROFILE_NAME,
@@ -259,6 +268,14 @@ class MCPAssistConversationEntity(ConversationEntity):
         else:
             # LM Studio or Ollama - URL can change, so make it a property below
             pass
+
+        # Speaker for each conversation id. A follow-up without a new proof
+        # cannot grow past the unknown rule. Lost on restart, like history.
+        self._speaker_nonces = NonceCache()
+        self._speaker_grants = {}
+        self._turn_grant = None
+        self._turn_access_config = None
+        self._turn_access_payload = None
 
         # HA conversation_id -> X-Hermes-Session-Id. Hermes echoes the
         # effective session id on every response (it can rotate on context
@@ -941,19 +958,100 @@ class MCPAssistConversationEntity(ConversationEntity):
         Called by the base ConversationEntity.async_process which manages
         ChatSession and ChatLog lifecycle automatically.
         """
-        _LOGGER.info("🎤 Voice request started - Processing: %s", user_input.text)
-
         # Store ChatLog for tool execution methods to access
         self._current_chat_log = chat_log_instance
         conversation_id = chat_log_instance.conversation_id
+        decision = self._prepare_access_turn(user_input, conversation_id)
+        # Log only after a tag has been removed, so the speaker mark stays out
+        # of the info log as well as the model context.
+        _LOGGER.info("🎤 Voice request started - Processing: %s", user_input.text)
+        server = self.hass.data.get(DOMAIN, {}).get("shared_mcp_server")
+        if decision.grant is not None and not decision.blocked and server is not None:
+            server.bind_speaker(conversation_id or "", decision.grant)
 
         try:
+            if decision.blocked:
+                return self._access_block_result(user_input, conversation_id, decision.reply)
             return await self._async_handle_message_inner(
                 user_input, conversation_id
             )
         finally:
-            # Clean up
+            if server is not None:
+                server.unbind_speaker(conversation_id or "")
+            self._turn_grant = None
+            self._turn_access_config = None
+            self._turn_access_payload = None
             self._current_chat_log = None
+
+    def _shared_config_dict(self) -> dict[str, Any]:
+        """System entry data, with options overlaid. Profile entry is the fallback."""
+        from . import get_system_entry
+
+        source: dict[str, Any] = {}
+        system_entry = get_system_entry(self.hass)
+        entry = system_entry or self.entry
+        source.update(entry.data)
+        source.update(entry.options)
+        return source
+
+    def _prepare_access_turn(self, user_input: ConversationInput, conversation_id: str):
+        """Strip a speaker tag and remember who is speaking.
+
+        Access control off: the text is not parsed and nothing is stored.
+        """
+        config = load_access_config(self._shared_config_dict())
+        self._turn_access_config = config if config.enabled else None
+        context = getattr(user_input, "context", None)
+        user_id = None
+        if context is not None:
+            user_id = getattr(context, "user_id", None)
+            if user_id is None and isinstance(context, dict):
+                user_id = context.get("user_id")
+        previous = self._speaker_grants.get(conversation_id or "")
+        now = dt_util.utcnow().timestamp()
+        decision, stored = decide_turn(
+            config,
+            user_input.text or "",
+            user_id=str(user_id) if user_id else None,
+            previous=previous,
+            now=now,
+            nonces=self._speaker_nonces,
+        )
+        if decision.enabled:
+            user_input.text = decision.text
+            self._turn_grant = decision.grant
+            self._turn_access_payload = (
+                grant_to_payload(decision.grant) if decision.grant is not None else None
+            )
+            if stored is not None:
+                self._speaker_grants[conversation_id or ""] = stored
+            if self.debug_mode:
+                level = decision.grant.level if decision.grant is not None else ""
+                _LOGGER.debug(
+                    "Access control person=%s verified=%s level=%s blocked=%s",
+                    decision.person or "unknown",
+                    decision.verified,
+                    level,
+                    decision.blocked,
+                )
+        else:
+            self._turn_grant = None
+            self._turn_access_payload = None
+        return decision
+
+    def _access_block_result(
+        self, user_input: ConversationInput, conversation_id: str, reply: str
+    ) -> ConversationResult:
+        """NONE: do not call the model. An empty reply stays silent."""
+        self.history.add_turn(conversation_id, user_input.text or "", reply or "")
+        intent_response = intent.IntentResponse(language=user_input.language)
+        spoken = self._clean_text_for_tts(reply) if reply else ""
+        intent_response.async_set_speech(spoken)
+        return ConversationResult(
+            response=intent_response,
+            conversation_id=conversation_id,
+            continue_conversation=False,
+        )
 
     async def _async_handle_message_inner(
         self, user_input: ConversationInput, conversation_id: str
@@ -1563,6 +1661,21 @@ class MCPAssistConversationEntity(ConversationEntity):
             index_manager = self.hass.data.get(DOMAIN, {}).get("index_manager")
             if index_manager:
                 index = await index_manager.get_index()
+                if (
+                    self._turn_grant is not None
+                    and self._turn_access_config is not None
+                    and not is_unrestricted(self._turn_grant)
+                ):
+                    try:
+                        index = filter_index(
+                            index,
+                            self._turn_grant,
+                            self._turn_access_config,
+                            snapshot_from_hass(self.hass),
+                        )
+                    except Exception:
+                        _LOGGER.exception("Access control could not filter the entity index")
+                        index = {}
                 index_json = json.dumps(index, indent=2)
             else:
                 index_json = "{}"
@@ -1799,6 +1912,11 @@ class MCPAssistConversationEntity(ConversationEntity):
                         or "",
                         "injected_facts": list(
                             getattr(self, "_turn_memory_facts", []) or []
+                        ),
+                        **(
+                            {"access": self._turn_access_payload}
+                            if self._turn_access_payload
+                            else {}
                         ),
                     },
                 },

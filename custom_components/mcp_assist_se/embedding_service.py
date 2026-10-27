@@ -45,7 +45,7 @@ _BACKFILL_LIMIT = 16
 _DOWNLOAD_TIMEOUT_SECONDS = 180
 _OPENAI_TIMEOUT_SECONDS = 2.5
 _PREPARE_RETRY_SECONDS = 300
-_USER_AGENT = "mcp-assist-se/0.23.1"
+_USER_AGENT = "mcp-assist-se/0.24.0"
 
 
 @dataclass(frozen=True)

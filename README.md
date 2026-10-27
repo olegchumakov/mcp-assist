@@ -77,6 +77,20 @@ Optional remote provider: OpenAI-compatible `POST /v1/embeddings`. Leave the bas
 
 See [docs/memory.md](docs/memory.md) for the tools and settings.
 
+## Voice access (v0.24.0)
+
+Per-person limits for voice commands. **Off by default.** While the switch is off, nothing changes: speaker marks are not read, the Speaker ID add-on is not required, and it is not contacted.
+
+Turn it on in the profile options (the page after memory). The shared password and the add-on address are optional.
+
+- Type names yourself, or point at the add-on (`GET /api/people` with header `X-Speaker-Key`, for example `http://local-wyoming-speaker-id:8099/api/people`). A 401 or any other failure keeps the typed names. The list is fetched when you save settings, not on each voice command.
+- Device groups are named sets of entities, devices, rooms, or labels.
+- Each person, and unknown voices as one group, gets Nothing, Selected groups, or Everything. Map Home Assistant users to a person for typed messages in the app.
+- Nothing skips the model. An empty reply stays silent.
+- State-changing tools check the target, including areas, devices, labels, floors, scripts, scenes, and automations, before the service runs. A denied call returns a refusal the model can say. Reading tools only return devices that person may see. The model never sees the speaker mark or the name.
+
+The mark format and the HMAC test vectors are in [SPEC.md](SPEC.md). The canonical vector (secret `test-secret`, time `1700000000`) is Anna / `turn on the light`, signature `4e3854eaed0f699014eead3a73f1a358618a699bb372d76d6715658adad72386`.
+
 ## Multilingual Support (v0.12.0+)
 
 MCP Assist supports **21 languages** with localized configuration interfaces, language-aware system prompts, and region-specific speech detection patterns. The integration automatically detects your Home Assistant system language and provides appropriate defaults for system prompts, follow-up phrases, and end conversation words. Supported languages include: Arabic, Chinese (Simplified), Czech, Danish, Dutch, Finnish, Filipino, French, German, Greek, Hindi, Italian, Japanese, Korean, Norwegian, Polish, Portuguese, Russian, Spanish, Swedish, and Turkish.

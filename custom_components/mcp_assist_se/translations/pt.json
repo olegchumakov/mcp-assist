@@ -95,7 +95,9 @@
       "auth_failed": "Autenticacao falhou. Por favor, verifique sua chave API.",
       "unknown": "Ocorreu um erro desconhecido.",
       "openclaw_connection_failed": "Não foi possível ligar ao gateway do OpenClaw. Verifique o host, a porta e o token.",
-      "openclaw_not_paired": "O dispositivo ainda não foi aprovado no servidor OpenClaw. Aprove-o e tente novamente."
+      "openclaw_not_paired": "O dispositivo ainda não foi aprovado no servidor OpenClaw. Aprove-o e tente novamente.",
+      "access_class_name": "Enter a unique group name.",
+      "access_classes_required": "Pick at least one group, or choose another level."
     },
     "abort": {
       "already_configured": "Ja existe um perfil com este nome. Por favor, escolha um nome diferente."
@@ -159,6 +161,75 @@
           "enable_memory_tools": "Permite ao assistente memorizar, recuperar e esquecer factos e preferências aprovados pelo utilizador. As memórias são mantidas até pedir para as esquecer.",
           "searxng_url": "URL base da sua instância SearXNG (por exemplo, http://192.168.11.102:8888). Usado quando a pesquisa Web está definida como SearXNG."
         }
+      },
+      "access": {
+        "title": "Voice access",
+        "description": "Off by default. While it is off, commands work exactly as before: the speaker mark is not read and the Speaker ID add-on is not contacted. Turn it on to limit who can control which devices. The password and the add-on address are optional. You can type names yourself.",
+        "data": {
+          "access_control_enabled": "Limit who can control devices",
+          "access_shared_secret": "Shared password",
+          "access_addon_url": "Speaker ID add-on address",
+          "access_min_confidence": "Minimum recognition confidence",
+          "access_none_reply": "Reply when nothing is allowed",
+          "access_manual_people": "Names"
+        },
+        "data_description": {
+          "access_control_enabled": "Leave this off if you do not need per-person limits.",
+          "access_shared_secret": "The same password as in the Speaker ID add-on. Leave empty if you only map Home Assistant users.",
+          "access_addon_url": "Optional. Example: http://local-wyoming-speaker-id:8099/api/people. A wrong password answers 401 and the names you typed are used instead. Leave empty if the add-on is not installed.",
+          "access_min_confidence": "0 accepts any signed voice. Raise it, for example to 0.6, to treat a weak match as unknown.",
+          "access_none_reply": "Spoken when this person may not use the assistant. Leave empty to stay silent.",
+          "access_manual_people": "One name per line. Used when the add-on is missing or unreachable."
+        }
+      },
+      "access_menu": {
+        "title": "Who can control what",
+        "description": "Create device groups, then choose a level for each person.",
+        "menu_options": {
+          "access_class_pick": "Device groups",
+          "access_rules": "People",
+          "access_users": "App users",
+          "access_finish": "Done"
+        }
+      },
+      "access_class_pick": {
+        "title": "Device groups",
+        "description": "A group is a set of devices, rooms, or labels. A person set to Selected groups can use only the groups you pick.",
+        "data": {
+          "access_class_choice": "Group"
+        }
+      },
+      "access_class_edit": {
+        "title": "Device group",
+        "description": "Pick individual entities, whole devices, rooms, or labels. A person allowed this group can use everything in it.",
+        "data": {
+          "access_class_name": "Group name",
+          "access_class_entities": "Entities",
+          "access_class_devices": "Whole devices",
+          "access_class_areas": "Rooms",
+          "access_class_labels": "Labels",
+          "access_class_delete": "Delete this group"
+        }
+      },
+      "access_rules": {
+        "title": "People",
+        "description": "Nothing: the assistant stays silent or says the reply you set. Selected groups: only those groups. Everything: no limit. A person with no row can do everything until you set a level. Unknown voice covers guests and failed recognition.",
+        "data": {
+          "access_manual_people": "Add names"
+        },
+        "data_description": {
+          "access_manual_people": "One name per line. Save to give each new name a level. The add-on is not required."
+        }
+      },
+      "access_users": {
+        "title": "App users",
+        "description": "Typed messages in the Home Assistant app have no voice mark. Map each user to a person. Unknown uses the unknown-voice level.",
+        "data": {
+          "access_user_lines": "User mapping"
+        },
+        "data_description": {
+          "access_user_lines": "One line per user: user id = person name. Leave a user out to treat them as unknown."
+        }
       }
     }
   },
@@ -173,6 +244,15 @@
     "reload_external_custom_tools": {
       "name": "Recarregar ferramentas personalizadas externas",
       "description": "Recarrega os pacotes de ferramentas personalizadas externas sem reiniciar o Home Assistant."
+    }
+  },
+  "selector": {
+    "access_level": {
+      "options": {
+        "none": "Nothing",
+        "selected": "Selected groups",
+        "all": "Everything"
+      }
     }
   }
 }
