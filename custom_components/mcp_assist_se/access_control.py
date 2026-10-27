@@ -209,29 +209,46 @@ def parse_people_payload(payload: Any) -> list[str]:
             value = item.get("name")
         else:
             value = item
-        name = " ".join(str(value).split()).strip() if isinstance(value, str) else ""
-        if name and name not in names:
-            names.append(name)
+        if isinstance(value, str):
+            names.append(value)
+    return dedupe_people(names)
+
+
+def normalize_person_name(name: str | None) -> str:
+    """Collapse whitespace. Capitals stay as written, for display."""
+    return " ".join(str(name or "").split()).strip()
+
+
+def person_key(name: str | None) -> str:
+    """Match key. Capitals and extra spaces do not count. Empty stays empty."""
+    return normalize_person_name(name).casefold()
+
+
+def dedupe_people(items) -> list[str]:
+    """One display spelling per person. The first spelling is kept."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        name = normalize_person_name(item if isinstance(item, str) else "")
+        key = person_key(name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
     return names
 
 
 def split_names(text: str | None) -> list[str]:
     """Split a textarea of people on commas and new lines."""
-    names: list[str] = []
+    raw: list[str] = []
     for line in str(text or "").replace(",", "\n").splitlines():
-        name = " ".join(line.split()).strip()
-        if name and name not in names:
-            names.append(name)
-    return names
+        raw.append(line)
+    return dedupe_people(raw)
 
 
 def people_catalog(config: AccessConfig) -> list[str]:
     """Manual names, cached add-on names, and anyone who already has a rule."""
-    names: list[str] = []
-    for name in (*config.cached_people, *config.manual_people, *config.rules.keys()):
-        if name and name not in names:
-            names.append(name)
-    return names
+    return dedupe_people((*config.cached_people, *config.manual_people, *config.rules.keys()))
 
 
 def _as_str_set(value: Any) -> frozenset[str]:
@@ -249,12 +266,7 @@ def _as_str_tuple(value: Any) -> tuple[str, ...]:
         return tuple(split_names(value))
     if not isinstance(value, (list, tuple)):
         return ()
-    names: list[str] = []
-    for item in value:
-        name = " ".join(str(item).split()).strip()
-        if name and name not in names:
-            names.append(name)
-    return tuple(names)
+    return tuple(dedupe_people(str(item) if item is not None else "" for item in value))
 
 
 def _level(value: Any, default: str) -> str:
@@ -305,12 +317,16 @@ def load_access_config(source: dict[str, Any] | None) -> AccessConfig:
             if parsed is not None:
                 classes[parsed.id] = parsed
     rules: dict[str, PersonRule] = {}
+    seen_people: set[str] = set()
     raw_rules = data.get(CONF_ACCESS_RULES) or {}
     if isinstance(raw_rules, dict):
         for name, rule in raw_rules.items():
-            person = " ".join(str(name).split()).strip()
-            if person:
-                rules[person] = _rule_from(rule, LEVEL_ALL)
+            person = normalize_person_name(str(name))
+            key = person_key(person)
+            if not key or key in seen_people:
+                continue
+            seen_people.add(key)
+            rules[person] = _rule_from(rule, LEVEL_ALL)
     try:
         minimum = float(data.get(CONF_ACCESS_MIN_CONFIDENCE, DEFAULT_ACCESS_MIN_CONFIDENCE) or 0)
     except (TypeError, ValueError):
@@ -321,7 +337,7 @@ def load_access_config(source: dict[str, Any] | None) -> AccessConfig:
     if isinstance(raw_map, dict):
         for user_id, person in raw_map.items():
             uid = str(user_id).strip()
-            name = " ".join(str(person).split()).strip() if isinstance(person, str) else ""
+            name = normalize_person_name(person if isinstance(person, str) else "")
             if uid and name:
                 user_map[uid] = name
     return AccessConfig(
@@ -388,16 +404,28 @@ def entity_allowed(entity: EntityRef, grant: Grant, config: AccessConfig) -> boo
     return False
 
 
+def rule_for_person(rules: dict[str, PersonRule], person: str) -> PersonRule | None:
+    """The stored rule for this name. Capitals and extra spaces do not matter."""
+    key = person_key(person)
+    if not key:
+        return None
+    for name, rule in rules.items():
+        if person_key(name) == key:
+            return rule
+    return None
+
+
 def grant_for_person(config: AccessConfig, person: str) -> Grant:
     """Rule for a recognized name. A missing name uses the unknown rule.
 
-    A person with no stored rule is ALL, so turning the feature on before
-    any rule is saved does not lock the home. SELECTED with no groups is
-    NONE: nothing was chosen.
+    ``олег`` is the same person as ``Олег``. A person with no stored rule is
+    ALL, so turning the feature on before any rule is saved does not lock
+    the home. SELECTED with no groups is NONE: nothing was chosen.
     """
-    if person and person in config.rules:
-        rule = config.rules[person]
-    elif person:
+    found = rule_for_person(config.rules, person)
+    if found is not None:
+        rule = found
+    elif person_key(person):
         rule = PersonRule(LEVEL_ALL)
     else:
         rule = config.unknown_rule
@@ -463,12 +491,12 @@ def decide_turn(
     person = ""
     if verdict.status == "valid":
         verified = True
-        person = verdict.person
+        person = normalize_person_name(verdict.person)
         if config.min_confidence > 0 and verdict.confidence < config.min_confidence:
             person = ""
     elif verdict.status == "absent" and user_id:
         verified = True
-        person = config.user_map.get(str(user_id), "")
+        person = normalize_person_name(config.user_map.get(str(user_id), ""))
 
     if verified:
         grant = grant_for_person(config, person)

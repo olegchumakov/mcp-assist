@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import sys
 import types
 import unittest
@@ -36,9 +38,13 @@ from mcp_assist_se.access_control import (
     filter_discovery_rows,
     filter_index,
     grant_for_person,
+    load_access_config,
+    parse_people_payload,
+    people_catalog,
     people_endpoint,
     people_from_response,
     should_fetch_people,
+    split_names,
 )
 from mcp_assist_se.speaker_tag import (
     HMAC_CYRILLIC_VECTOR,
@@ -48,6 +54,16 @@ from mcp_assist_se.speaker_tag import (
     NonceCache,
     verify_speaker_tag,
 )
+
+
+def _signed(name: str, transcript: str = "включи свет") -> str:
+    encoded = quote(name, safe="")
+    confidence, created, nonce = "0.90", "1700000000", "abcdef0123456789"
+    message = f"spk1|{encoded}|{confidence}|{created}|{nonce}|{transcript}"
+    signature = hmac.new(b"test-secret", message.encode(), hashlib.sha256).hexdigest()
+    return (
+        f"⟦spk1;n={encoded};c={confidence};t={created};r={nonce};s={signature}⟧ {transcript}"
+    )
 
 
 def _tag(vector: dict, sig: str | None = None) -> str:
@@ -584,6 +600,92 @@ class ModeTests(unittest.TestCase):
         self.assertEqual(decision.person, "")
         self.assertTrue(decision.blocked)
         self.assertEqual(decision.text, "turn on the light")
+
+
+class PersonNameTests(unittest.TestCase):
+    def _oleg(self, **kwargs) -> AccessConfig:
+        values = dict(
+            enabled=True,
+            secret="test-secret",
+            rules={"Олег": PersonRule(LEVEL_SELECTED, frozenset({"lights"}))},
+            unknown_rule=PersonRule(LEVEL_NONE),
+            classes=_config().classes,
+        )
+        values.update(kwargs)
+        return AccessConfig(**values)
+
+    def test_oleg_matches_regardless_of_capitals_and_spaces(self) -> None:
+        config = self._oleg()
+        self.assertEqual(grant_for_person(config, "олег").level, LEVEL_SELECTED)
+        self.assertEqual(grant_for_person(config, "ОЛЕГ").level, LEVEL_SELECTED)
+        self.assertEqual(grant_for_person(config, "  Олег  ").level, LEVEL_SELECTED)
+        self.assertEqual(grant_for_person(config, "олег   петров").level, LEVEL_ALL)
+        spaced = self._oleg(rules={"Олег Петров": PersonRule(LEVEL_NONE)})
+        self.assertTrue(_grant_blocks(grant_for_person(spaced, "олег   петров")))
+        self.assertEqual(grant_for_person(config, "Анна").level, LEVEL_ALL)
+
+    def test_signed_lowercase_name_uses_the_saved_rule(self) -> None:
+        decision, _stored = decide_turn(
+            self._oleg(),
+            _signed("олег"),
+            user_id=None,
+            previous=None,
+            now=VECTOR_NOW,
+            nonces=NonceCache(),
+        )
+        self.assertEqual(decision.person, "олег")
+        self.assertEqual(decision.grant.level, LEVEL_SELECTED)
+        self.assertFalse(decision.blocked)
+
+    def test_typed_user_mapping_ignores_capitals(self) -> None:
+        config = AccessConfig(
+            enabled=True,
+            rules={"Олег": PersonRule(LEVEL_NONE)},
+            unknown_rule=PersonRule(LEVEL_ALL),
+            user_map={"user-1": "олег"},
+        )
+        decision, _stored = decide_turn(
+            config,
+            "включи свет",
+            user_id="user-1",
+            previous=None,
+            now=VECTOR_NOW,
+            nonces=NonceCache(),
+        )
+        self.assertEqual(decision.person, "олег")
+        self.assertTrue(decision.blocked)
+
+    def test_people_lists_collapse_the_same_name(self) -> None:
+        self.assertEqual(
+            parse_people_payload(
+                {"people": [{"name": "Олег"}, {"name": "олег"}, {"name": "  ОЛЕГ "}]}
+            ),
+            ["Олег"],
+        )
+        self.assertEqual(split_names("Олег, олег\nАнна"), ["Олег", "Анна"])
+        self.assertEqual(
+            people_catalog(
+                AccessConfig(
+                    cached_people=("Олег",),
+                    manual_people=("олег",),
+                    rules={"ОЛЕГ": PersonRule(LEVEL_NONE)},
+                )
+            ),
+            ["Олег"],
+        )
+
+    def test_saved_rules_keep_the_first_spelling(self) -> None:
+        loaded = load_access_config(
+            {
+                "access_control_enabled": True,
+                "access_rules": {
+                    "Олег": {"level": "none", "classes": []},
+                    "олег": {"level": "all", "classes": []},
+                },
+            }
+        )
+        self.assertEqual(list(loaded.rules), ["Олег"])
+        self.assertEqual(grant_for_person(loaded, "олег").level, LEVEL_NONE)
 
 
 if __name__ == "__main__":

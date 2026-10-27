@@ -91,6 +91,11 @@ Turn it on in the profile options (the page after memory). The shared password a
 
 The mark format and the HMAC test vectors are in [SPEC.md](SPEC.md). The canonical vector (secret `test-secret`, time `1700000000`) is Anna / `turn on the light`, signature `4e3854eaed0f699014eead3a73f1a358618a699bb372d76d6715658adad72386`.
 
+## Voice access wording and names (v0.24.1)
+
+- The voice-access settings are written in everyday language. Each field says what it is for, whether you have to fill it in, and what happens if you leave it empty. The address field only copies the list of known voices so you can pick people. Who is speaking still comes with each phrase when that address is empty.
+- A person's name matches whether or not the capitals agree. «олег» is the same person as «Олег». Extra spaces are ignored. This applies to a spoken name, a typed Home Assistant user, the voice list, and duplicate names.
+
 ## Multilingual Support (v0.12.0+)
 
 MCP Assist supports **21 languages** with localized configuration interfaces, language-aware system prompts, and region-specific speech detection patterns. The integration automatically detects your Home Assistant system language and provides appropriate defaults for system prompts, follow-up phrases, and end conversation words. Supported languages include: Arabic, Chinese (Simplified), Czech, Danish, Dutch, Finnish, Filipino, French, German, Greek, Hindi, Italian, Japanese, Korean, Norwegian, Polish, Portuguese, Russian, Spanish, Swedish, and Turkish.
