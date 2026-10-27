@@ -27,6 +27,7 @@ from homeassistant.helpers.selector import (
     BooleanSelector,
 )
 
+from .access_options import AccessOptionsMixin
 from .localization import get_language_instruction, get_follow_up_phrases, get_end_words
 
 from .const import (
@@ -1435,7 +1436,7 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return MCPAssistOptionsFlow()
 
 
-class MCPAssistOptionsFlow(config_entries.OptionsFlow):
+class MCPAssistOptionsFlow(AccessOptionsMixin, config_entries.OptionsFlow):
     """Handle options flow for MCP Assist integration."""
 
     def __init__(self) -> None:
@@ -2095,7 +2096,7 @@ class MCPAssistOptionsFlow(config_entries.OptionsFlow):
             normalized, errors = validate_memory_submission(user_input)
             if not errors:
                 self._update_shared_settings(normalized)
-                return self._finish_profile_options()
+                return await self.async_step_access()
 
         return self.async_show_form(
             step_id="memory",

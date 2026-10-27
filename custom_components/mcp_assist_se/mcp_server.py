@@ -23,6 +23,20 @@ from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.util import dt as dt_util
 
+from .access_control import (
+    authorize_action,
+    external_tool_allowed,
+    filter_discovery_rows,
+    filter_index,
+    grant_for_person,
+    grant_from_payload,
+    is_unrestricted,
+    load_access_config,
+    refusal_tool_result,
+    strip_targeting,
+    entity_visible,
+)
+from .access_hass import snapshot_from_hass
 from .action_verify import (
     CONFIRM_WAIT_SECONDS,
     POLL_SECONDS,
@@ -210,6 +224,13 @@ class MCPServer:
         # Per-conversation remember guards. Shown texts may be confirmed with
         # mode=add. A failed update blocks the following mode=add.
         self._store_guards: dict[str, dict[str, set[str]]] = {}
+        # Speaker grant for a voice turn whose tools arrive without context
+        # (OpenClaw / Hermes call the MCP server themselves).
+        self._bound_grants: dict[str, Any] = {}
+        self._tool_grant = None
+        self._tool_config = None
+        self._access_snap = None
+        self._access_snap_failed = False
 
     def _get_shared_setting(self, key: str, default: Any) -> Any:
         """Get a shared setting from system entry with fallback to profile entry."""
@@ -2163,7 +2184,116 @@ class MCPServer:
         # nextCursor is optional - omit if not paginating
         return {"tools": tools}
 
+    def bind_speaker(self, conversation_id: str, grant) -> None:
+        """Remember the speaker for tool calls that do not carry a context."""
+        self._bound_grants[conversation_id or ""] = grant
+
+    def unbind_speaker(self, conversation_id: str) -> None:
+        """Drop the speaker bound for one conversation."""
+        self._bound_grants.pop(conversation_id or "", None)
+
+    def _load_access_config(self):
+        from . import get_system_entry
+
+        source: dict[str, Any] = {}
+        system_entry = get_system_entry(self.hass)
+        entry = system_entry or self.entry
+        if entry is not None:
+            source.update(getattr(entry, "data", {}) or {})
+            source.update(getattr(entry, "options", {}) or {})
+        return load_access_config(source)
+
+    def _grant_for_call(self, context: Any):
+        """Grant for this tool call. Unknown when access control is on and no speaker was sent."""
+        config = self._tool_config
+        if config is None or not config.enabled:
+            return None
+        payload = context.get("access") if isinstance(context, dict) else None
+        if payload:
+            return grant_from_payload(payload)
+        bound = list(self._bound_grants.values())
+        if len(bound) == 1:
+            return bound[0]
+        if len(bound) > 1:
+            grant = bound[0]
+            for other in bound[1:]:
+                grant = grant.intersect(other)
+            return grant
+        return grant_for_person(config, "")
+
+    def _begin_tool_access(self, context: Any) -> None:
+        self._tool_config = self._load_access_config()
+        self._tool_grant = (
+            self._grant_for_call(context) if self._tool_config.enabled else None
+        )
+        self._access_snap = None
+        self._access_snap_failed = False
+
+    def _end_tool_access(self) -> None:
+        self._tool_grant = None
+        self._tool_config = None
+        self._access_snap = None
+        self._access_snap_failed = False
+
+    def _access_restricted(self) -> bool:
+        return self._tool_grant is not None and not is_unrestricted(self._tool_grant)
+
+    def _access_snapshot(self):
+        if self._access_snap_failed:
+            return None
+        if self._access_snap is None:
+            try:
+                self._access_snap = snapshot_from_hass(self.hass)
+            except Exception:
+                _LOGGER.exception("Access control could not read entities")
+                self._access_snap_failed = True
+                return None
+        return self._access_snap
+
+    def _prepare_service_call(self, domain: str, service: str, target: Any, data: Any, *, broad_data: bool):
+        """Return (target, data, refusal or None). Refusal means do not call the service."""
+        if not self._access_restricted():
+            return target, data, None
+        snap = self._access_snapshot()
+        if snap is None or self._tool_config is None or self._tool_grant is None:
+            return target, data, refusal_tool_result()
+        decision = authorize_action(
+            domain,
+            service,
+            target or {},
+            data or {},
+            self._tool_grant,
+            self._tool_config,
+            snap,
+            broad_data=broad_data,
+        )
+        if not decision.allowed:
+            return target, data, refusal_tool_result()
+        if decision.passthrough or broad_data:
+            return target, data, None
+        return {"entity_id": list(decision.entity_ids)}, strip_targeting(data if isinstance(data, dict) else {}), None
+
     async def handle_tool_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle tools/call request, enforcing the speaker grant when access control is on."""
+        context = params.get("context")
+        tool_name = params.get("name")
+        self._begin_tool_access(context)
+        try:
+            if (
+                self._access_restricted()
+                and self.custom_tools
+                and self.custom_tools.is_custom_tool(tool_name)
+                and not external_tool_allowed(
+                    self._tool_grant,
+                    self.custom_tools.is_external_custom_tool(tool_name),
+                )
+            ):
+                return refusal_tool_result()
+            return await self._dispatch_tool_call(params)
+        finally:
+            self._end_tool_access()
+
+    async def _dispatch_tool_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle tools/call request."""
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
@@ -2253,6 +2383,13 @@ class MCPServer:
             name_pattern=args.get("name_pattern"),
             inferred_type=args.get("inferred_type"),
         )
+        if self._access_restricted():
+            snap = self._access_snapshot()
+            entities = (
+                []
+                if snap is None or self._tool_grant is None or self._tool_config is None
+                else filter_discovery_rows(entities, self._tool_grant, self._tool_config, snap)
+            )
 
         # Notify completion
         self.publish_progress(
@@ -2405,6 +2542,18 @@ class MCPServer:
     async def tool_get_entity_details(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Get detailed information about specific entities."""
         entity_ids = args.get("entity_ids", [])
+        if self._access_restricted():
+            snap = self._access_snapshot()
+            if snap is None or self._tool_grant is None or self._tool_config is None:
+                entity_ids = []
+            else:
+                entity_ids = [
+                    entity_id
+                    for entity_id in entity_ids
+                    if entity_visible(entity_id, self._tool_grant, self._tool_config, snap)
+                ]
+            if not entity_ids:
+                return {"content": [{"type": "text", "text": "No entities found."}]}
         details = await self.discovery.get_entity_details(entity_ids)
 
         details = _strip_non_json_serializable(details)
@@ -2413,6 +2562,22 @@ class MCPServer:
     async def tool_list_areas(self) -> Dict[str, Any]:
         """List all areas."""
         areas = await self.discovery.list_areas()
+        if self._access_restricted():
+            snap = self._access_snapshot()
+            visible: dict[str, int] = {}
+            if snap is not None and self._tool_grant is not None and self._tool_config is not None:
+                for entity in snap.entities.values():
+                    if entity.area_id and entity_visible(
+                        entity.entity_id, self._tool_grant, self._tool_config, snap
+                    ):
+                        visible[entity.area_id] = visible.get(entity.area_id, 0) + 1
+            filtered = []
+            for area in areas:
+                if area.get("id") in visible:
+                    copied = dict(area)
+                    copied["entity_count"] = visible[area["id"]]
+                    filtered.append(copied)
+            areas = filtered
 
         return {
             "content": [
@@ -2451,6 +2616,17 @@ class MCPServer:
         """List all domains with entity counts and support status."""
         # Get domains that have entities in this HA instance
         entity_domains = await self.discovery.list_domains()
+        if self._access_restricted():
+            snap = self._access_snapshot()
+            counts: dict[str, int] = {}
+            if snap is not None and self._tool_grant is not None and self._tool_config is not None:
+                for entity in snap.entities.values():
+                    if entity_visible(entity.entity_id, self._tool_grant, self._tool_config, snap):
+                        counts[entity.domain] = counts.get(entity.domain, 0) + 1
+            entity_domains = [
+                {"domain": domain, "count": count}
+                for domain, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            ]
         entity_domain_map = {d["domain"]: d["count"] for d in entity_domains}
 
         # Get all supported domains from registry
@@ -2509,6 +2685,12 @@ class MCPServer:
 
         # Get the index
         index = await index_manager.get_index()
+        if self._access_restricted():
+            snap = self._access_snapshot()
+            if snap is None or self._tool_grant is None or self._tool_config is None:
+                index = {}
+            else:
+                index = filter_index(index, self._tool_grant, self._tool_config, snap)
 
         # Format as JSON for structured consumption
         return {"content": [{"type": "text", "text": json.dumps(index, indent=2)}]}
@@ -2568,6 +2750,12 @@ class MCPServer:
             error_msg = str(err)
             _LOGGER.error(f"Service validation error: {error_msg}")
             return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+        target, data, refusal = self._prepare_service_call(
+            domain, service, target, data, broad_data=False
+        )
+        if refusal is not None:
+            return refusal
 
         # Resolve target (convert areas to entity_ids if needed)
         try:
@@ -2929,6 +3117,16 @@ class MCPServer:
         if exposure_error:
             return exposure_error
 
+        _ignored_target, _ignored_data, refusal = self._prepare_service_call(
+            "script",
+            script_name,
+            {"entity_id": full_script_id},
+            variables if isinstance(variables, dict) else {},
+            broad_data=True,
+        )
+        if refusal is not None:
+            return refusal
+
         _LOGGER.info(
             "📜 Running script: %s with variables: %s",
             _sanitize_log_value(full_script_id, 100),
@@ -3005,6 +3203,16 @@ class MCPServer:
         if exposure_error:
             return exposure_error
 
+        _ignored_target, _ignored_data, refusal = self._prepare_service_call(
+            "automation",
+            "trigger",
+            {"entity_id": automation_id},
+            variables if isinstance(variables, dict) else {},
+            broad_data=True,
+        )
+        if refusal is not None:
+            return refusal
+
         _LOGGER.info(
             "🤖 Triggering automation: %s with variables: %s, skip_conditions: %s",
             _sanitize_log_value(automation_id, 100),
@@ -3059,6 +3267,20 @@ class MCPServer:
         limit = min(args.get("limit", 50), 100)  # Max 100 changes
 
         _LOGGER.info(f"📜 Getting history for {entity_id}: {hours} hours, limit {limit}")
+        if self._access_restricted():
+            snap = self._access_snapshot()
+            visible = (
+                snap is not None
+                and self._tool_grant is not None
+                and self._tool_config is not None
+                and entity_visible(entity_id, self._tool_grant, self._tool_config, snap)
+            )
+            if not visible:
+                return {
+                    "content": [
+                        {"type": "text", "text": f"Entity '{entity_id}' not found."}
+                    ]
+                }
 
         # Notify start
         self.publish_progress(

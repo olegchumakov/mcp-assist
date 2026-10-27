@@ -323,3 +323,24 @@ Personality tools are enabled.
 - If the user replaces a style, replace the existing instruction or reset the block. Do not keep contradictory styles.
 - If the tool says nothing was removed, do not tell the user that you forgot it.
 """
+
+# --- Voice access control (off by default; no Speaker ID add-on required) ---
+CONF_ACCESS_CONTROL_ENABLED = "access_control_enabled"
+CONF_ACCESS_SHARED_SECRET = "access_shared_secret"
+CONF_ACCESS_ADDON_URL = "access_addon_url"
+CONF_ACCESS_MIN_CONFIDENCE = "access_min_confidence"
+CONF_ACCESS_NONE_REPLY = "access_none_reply"
+CONF_ACCESS_MANUAL_PEOPLE = "access_manual_people"
+CONF_ACCESS_CACHED_PEOPLE = "access_cached_people"
+CONF_ACCESS_CLASSES = "access_classes"
+CONF_ACCESS_RULES = "access_rules"
+CONF_ACCESS_UNKNOWN_RULE = "access_unknown_rule"
+CONF_ACCESS_USER_MAP = "access_user_map"
+CONF_ACCESS_USER_LINES = "access_user_lines"
+
+DEFAULT_ACCESS_CONTROL_ENABLED = False
+DEFAULT_ACCESS_MIN_CONFIDENCE = 0.0
+DEFAULT_ACCESS_NONE_REPLY = ""
+# Missing rules stay open so enabling the switch before rules are saved
+# does not lock the home. A saved NONE or SELECTED rule is enforced.
+DEFAULT_ACCESS_UNKNOWN_LEVEL = "all"
