@@ -44,8 +44,12 @@ from .access_control import (
     LEVEL_SELECTED,
     delete_class,
     load_access_config,
+    normalize_person_name,
+    people_catalog,
     people_endpoint,
     people_from_response,
+    person_key,
+    rule_for_person,
     settings_updates,
     should_fetch_people,
     split_names,
@@ -73,15 +77,15 @@ _UI = {
         "unknown_voice": "Unknown voice",
         "new_group": "New group",
         "back": "Back",
-        "groups_for": "Groups for",
-        "groups_for_unknown": "Groups for an unknown voice",
+        "groups_for": "which groups",
+        "groups_for_unknown": "Which groups an unknown voice may use",
     },
     "ru": {
         "unknown_voice": "Незнакомый голос",
         "new_group": "Новая группа",
         "back": "Назад",
-        "groups_for": "Группы для",
-        "groups_for_unknown": "Группы для незнакомого голоса",
+        "groups_for": "какие группы",
+        "groups_for_unknown": "Какие группы можно незнакомому голосу",
     },
 }
 
@@ -105,7 +109,7 @@ def parse_user_lines(text: str | None) -> dict[str, str]:
             continue
         user_id, name = line.split("=", 1)
         user_id = user_id.strip()
-        person = " ".join(name.split()).strip()
+        person = normalize_person_name(name)
         if user_id and person:
             mapping[user_id] = person
     return mapping
@@ -383,16 +387,12 @@ class AccessOptionsMixin:
                 "class_key": unique(groups_unknown),
             }
         ]
-        seen: list[str] = []
-        for name in (*config.cached_people, *config.manual_people, *config.rules.keys()):
-            if name and name not in seen:
-                seen.append(name)
-        for name in seen:
+        for name in people_catalog(config):
             rows.append(
                 {
                     "person": name,
                     "level_key": unique(name),
-                    "class_key": unique(f"{groups_for} {name}"),
+                    "class_key": unique(f"{name} — {groups_for}"),
                 }
             )
         return rows
@@ -423,9 +423,12 @@ class AccessOptionsMixin:
                     unknown_rule = record
             added = split_names(user_input.get(CONF_ACCESS_MANUAL_PEOPLE))
             manual = list(config.manual_people)
+            seen = {person_key(name) for name in manual}
             for name in added:
-                if name not in manual:
+                key = person_key(name)
+                if key and key not in seen:
                     manual.append(name)
+                    seen.add(key)
             if not errors:
                 self._update_shared_settings(
                     {
@@ -442,7 +445,7 @@ class AccessOptionsMixin:
 
         schema: dict[Any, Any] = {}
         for row in rows:
-            rule = config.unknown_rule if not row["person"] else config.rules.get(row["person"])
+            rule = config.unknown_rule if not row["person"] else rule_for_person(config.rules, row["person"])
             level = rule.level if rule is not None else LEVEL_ALL
             chosen = sorted(rule.class_ids) if rule is not None else []
             schema[vol.Required(row["level_key"], default=level)] = _level_selector()
@@ -476,10 +479,7 @@ class AccessOptionsMixin:
         config = load_access_config(self._shared())
         users = await self._visible_users()
         language = flow_language(self.hass)
-        people = []
-        for name in (*config.cached_people, *config.manual_people, *config.rules.keys()):
-            if name and name not in people:
-                people.append(name)
+        people = people_catalog(config)
         person_options = [
             {"value": "__unknown__", "label": ui_text(language, "unknown_voice")},
             *[{"value": name, "label": name} for name in people],
@@ -514,9 +514,12 @@ class AccessOptionsMixin:
                 return await self.async_step_access_menu()
             schema: dict[Any, Any] = {}
             for label, user_id in fields.items():
-                current = config.user_map.get(user_id) or "__unknown__"
-                if current not in {item["value"] for item in person_options}:
-                    current = "__unknown__"
+                mapped = config.user_map.get(user_id) or ""
+                current = "__unknown__"
+                for item in person_options:
+                    if item["value"] != "__unknown__" and person_key(item["value"]) == person_key(mapped):
+                        current = item["value"]
+                        break
                 schema[vol.Required(label, default=current)] = person_selector
             return self.async_show_form(step_id="access_users", data_schema=vol.Schema(schema))
 

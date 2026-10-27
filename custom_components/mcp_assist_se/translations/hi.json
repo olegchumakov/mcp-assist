@@ -96,8 +96,8 @@
       "unknown": "एक अज्ञात त्रुटि हुई।",
       "openclaw_connection_failed": "OpenClaw गेटवे से कनेक्ट नहीं हो सका। होस्ट, पोर्ट और टोकन जाँचें।",
       "openclaw_not_paired": "डिवाइस अभी OpenClaw सर्वर पर स्वीकृत नहीं है। इसे स्वीकृत करके फिर से प्रयास करें।",
-      "access_class_name": "Enter a unique group name.",
-      "access_classes_required": "Pick at least one group, or choose another level."
+      "access_class_name": "Type a name that is not already used. The group needs a name.",
+      "access_classes_required": "Pick at least one group, or choose Not allowed or Allowed to do everything."
     },
     "abort": {
       "already_configured": "इस नाम की प्रोफ़ाइल पहले से मौजूद है। कृपया कोई अलग नाम चुनें।"
@@ -163,72 +163,83 @@
         }
       },
       "access": {
-        "title": "Voice access",
-        "description": "Off by default. While it is off, commands work exactly as before: the speaker mark is not read and the Speaker ID add-on is not contacted. Turn it on to limit who can control which devices. The password and the add-on address are optional. You can type names yourself.",
+        "title": "Who may use what",
+        "description": "This starts off, and the assistant works as it does today. Turn it on only if you want to decide who in the home may use which things.",
         "data": {
-          "access_control_enabled": "Limit who can control devices",
-          "access_shared_secret": "Shared password",
-          "access_addon_url": "Speaker ID add-on address",
-          "access_min_confidence": "Minimum recognition confidence",
-          "access_none_reply": "Reply when nothing is allowed",
-          "access_manual_people": "Names"
+          "access_control_enabled": "Different rules for different people",
+          "access_shared_secret": "Voice recognition password",
+          "access_addon_url": "Address of the voice list",
+          "access_min_confidence": "How sure a voice match must be",
+          "access_none_reply": "What to say when someone is not allowed",
+          "access_manual_people": "People's names"
         },
         "data_description": {
-          "access_control_enabled": "Leave this off if you do not need per-person limits.",
-          "access_shared_secret": "The same password as in the Speaker ID add-on. Leave empty if you only map Home Assistant users.",
-          "access_addon_url": "Optional. Example: http://local-wyoming-speaker-id:8099/api/people. A wrong password answers 401 and the names you typed are used instead. Leave empty if the add-on is not installed.",
-          "access_min_confidence": "0 accepts any signed voice. Raise it, for example to 0.6, to treat a weak match as unknown.",
-          "access_none_reply": "Spoken when this person may not use the assistant. Leave empty to stay silent.",
-          "access_manual_people": "One name per line. Used when the add-on is missing or unreachable."
+          "access_control_enabled": "What this is for: so each person can have their own yes and no. Required: no. Left off, which is how it starts, the assistant does not check who is speaking and everything works as before.",
+          "access_shared_secret": "What this is for: the same password you set in the program that recognizes people by voice. The assistant uses it to trust that the name in a spoken phrase is real. Required: no. If you leave it empty, a spoken voice is not checked and the assistant does not know who is speaking. You do not need a password for messages typed in the app.",
+          "access_addon_url": "What this is for: only to copy the list of people that the voice-recognition program already knows, so you can pick them from a list instead of typing. Required: no. If you leave it empty, type the names yourself, spelled the same way as in that program. Who is speaking still comes with each phrase, even when this box is empty. If you do not have that program, leave this empty.",
+          "access_min_confidence": "What this is for: ignore a weak “sounds like this person”. Required: no. If you leave it at 0, any match is accepted. If you set it higher, for example 0.6, a weak match counts as someone the assistant does not know.",
+          "access_none_reply": "What this is for: the sentence the assistant says to a person who is not allowed to use it. Required: no. If you leave it empty, the assistant stays silent.",
+          "access_manual_people": "What this is for: the people you will give rules to. Required: no. If you leave it empty and do not fill in the voice-list address, there are no named people. You can still set a rule for an unknown voice and for people who type in the app. Write one name per line, the same way the person is named in voice recognition. Capital letters do not matter."
         }
       },
       "access_menu": {
-        "title": "Who can control what",
-        "description": "Create device groups, then choose a level for each person.",
+        "title": "Who may do what",
+        "description": "First make groups of things. Then choose what each person may use. You do not have to do this now: Done takes you back, and you can return later.",
         "menu_options": {
-          "access_class_pick": "Device groups",
+          "access_class_pick": "Groups of things",
           "access_rules": "People",
-          "access_users": "App users",
+          "access_users": "People who type in the app",
           "access_finish": "Done"
         }
       },
       "access_class_pick": {
-        "title": "Device groups",
-        "description": "A group is a set of devices, rooms, or labels. A person set to Selected groups can use only the groups you pick.",
+        "title": "Groups of things",
+        "description": "A group is things, rooms, or labels you can later allow a person to use. This step is optional. Without any groups you can still allow a person everything, or nothing.",
         "data": {
-          "access_class_choice": "Group"
+          "access_class_choice": "Which group to open"
+        },
+        "data_description": {
+          "access_class_choice": "What this is for: change a group you already made, or start a new one. You do have to pick one of these. New group starts an empty group. Back returns without saving."
         }
       },
       "access_class_edit": {
-        "title": "Device group",
-        "description": "Pick individual entities, whole devices, rooms, or labels. A person allowed this group can use everything in it.",
+        "title": "A group of things",
+        "description": "Name the group and tick what belongs in it. A person who is given this group can use everything you tick here. You do not have to tick every box.",
         "data": {
-          "access_class_name": "Group name",
-          "access_class_entities": "Entities",
+          "access_class_name": "Name",
+          "access_class_entities": "Single things",
           "access_class_devices": "Whole devices",
           "access_class_areas": "Rooms",
           "access_class_labels": "Labels",
           "access_class_delete": "Delete this group"
+        },
+        "data_description": {
+          "access_class_name": "What this is for: so you can recognize the group in the list. Required: yes. If you leave it empty, the group is not saved.",
+          "access_class_entities": "What this is for: one light, switch, or sensor. Required: no. If you leave it empty, no single things are added.",
+          "access_class_devices": "What this is for: one device and everything on it. Required: no. If you leave it empty, no whole devices are added.",
+          "access_class_areas": "What this is for: the person can use what is in these rooms. Required: no. If you leave it empty, no rooms are added.",
+          "access_class_labels": "What this is for: things you have already put a label on in Home Assistant. Required: no. If you leave it empty, no labels are added.",
+          "access_class_delete": "What this is for: remove the group. Required: no. Leave it off and the group stays. Turn it on and save, and the group is removed."
         }
       },
       "access_rules": {
         "title": "People",
-        "description": "Nothing: the assistant stays silent or says the reply you set. Selected groups: only those groups. Everything: no limit. A person with no row can do everything until you set a level. Unknown voice covers guests and failed recognition.",
+        "description": "Under each name, the first choice is what they may do: Not allowed, Only chosen groups, or Allowed to do everything. The second choice is which groups, and you fill it in only when you picked Only chosen groups. Until you choose, a person may do everything. An unknown voice is a guest, or a voice that was not recognized.",
         "data": {
           "access_manual_people": "Add names"
         },
         "data_description": {
-          "access_manual_people": "One name per line. Save to give each new name a level. The add-on is not required."
+          "access_manual_people": "What this is for: add people who are not in the list above. Required: no. If you leave it empty, the list stays as it is. After you save, each new name appears above so you can choose what they may do. One name per line. Capital letters are the same person."
         }
       },
       "access_users": {
-        "title": "App users",
-        "description": "Typed messages in the Home Assistant app have no voice mark. Map each user to a person. Unknown uses the unknown-voice level.",
+        "title": "People who type in the app",
+        "description": "Text typed in the Home Assistant app is not a voice. Here you say which person that user is. Required: no. If you do not choose anyone, the rules for an unknown voice apply to them.",
         "data": {
-          "access_user_lines": "User mapping"
+          "access_user_lines": "Who is who"
         },
         "data_description": {
-          "access_user_lines": "One line per user: user id = person name. Leave a user out to treat them as unknown."
+          "access_user_lines": "What this is for: say which person this is, when the list of app users could not be shown above. Required: no. If you leave it empty, everyone who types in the app counts as an unknown voice. One line: how that person is listed under Settings, People, then =, then their name. For example: abc123 = Olga."
         }
       }
     }
@@ -249,9 +260,9 @@
   "selector": {
     "access_level": {
       "options": {
-        "none": "Nothing",
-        "selected": "Selected groups",
-        "all": "Everything"
+        "none": "Not allowed",
+        "selected": "Only chosen groups",
+        "all": "Allowed to do everything"
       }
     }
   }
