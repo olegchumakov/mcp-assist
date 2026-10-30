@@ -124,7 +124,7 @@ from .const import (
     MIN_REASONING_COMPLETION_TOKENS,
 )
 from .conversation_history import ConversationHistory
-from .ha_compat import build_tool_result_content
+from .ha_compat import build_tool_result_content, device_area_id
 from .localization import get_goodbye_response
 from .stream_tool_calls import finalize_streamed_tool_calls, merge_streamed_tool_fragment
 from .round_trips import can_finish_without_followup, tool_call_names
@@ -1001,12 +1001,7 @@ class MCPAssistConversationEntity(ConversationEntity):
         """
         config = load_access_config(self._shared_config_dict())
         self._turn_access_config = config if config.enabled else None
-        context = getattr(user_input, "context", None)
-        user_id = None
-        if context is not None:
-            user_id = getattr(context, "user_id", None)
-            if user_id is None and isinstance(context, dict):
-                user_id = context.get("user_id")
+        user_id = user_input.context.user_id
         previous = self._speaker_grants.get(conversation_id or "")
         now = dt_util.utcnow().timestamp()
         decision, stored = decide_turn(
@@ -1560,10 +1555,7 @@ class MCPAssistConversationEntity(ConversationEntity):
     async def _get_current_area(self, user_input: ConversationInput) -> str:
         """Get the area of the satellite/device making the request."""
         try:
-            # Try to get device_id from context
-            device_id = (
-                user_input.device_id if hasattr(user_input, "device_id") else None
-            )
+            device_id = user_input.device_id
 
             if not device_id:
                 _LOGGER.debug("No device_id in conversation input")
@@ -1577,8 +1569,8 @@ class MCPAssistConversationEntity(ConversationEntity):
                 _LOGGER.debug("No device found for device_id: %s", device_id)
                 return "Unknown"
 
-            # Get area from device
-            area_id = device_entry.area_id
+            # Get area from device (a child device inherits its parent's area)
+            area_id = device_area_id(self.hass, device_entry)
             if not area_id:
                 _LOGGER.debug("Device %s has no assigned area", device_id)
                 return "Unknown"

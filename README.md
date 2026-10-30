@@ -107,21 +107,30 @@ Some devices take a few seconds to show that a command worked. A TV switched on 
 - When you name one device, the assistant is told to control only that device and not add related ones, such as a streaming box next to the TV.
 - With debug logging on, each checked device logs one line with what was expected, the outcome, and how many seconds it took.
 
+## Works the same on old and new Home Assistant (v0.24.3)
+
+- The oldest supported Home Assistant is now 2025.10. HACS will not offer this version to older installs.
+- Tested on Home Assistant 2025.10 and 2026.10. Neither one logs deprecation warnings from this integration.
+- A device that sits inside another device (a "child" device, new in Home Assistant 2026.9) now counts as being in its parent's room when it has no room of its own. Room lists, room counts, voice access checks, and "which room am I in" for a voice satellite all follow this.
+- Entity aliases that only say "use the entity name" are now turned into the real name. Before, on Home Assistant 2026.4 and newer, such an alias could show up as odd text in the device list.
+- Script fields are read from the public list of actions instead of the script internals. Scripts whose entity ID was renamed still show their fields.
+- No settings change and no restart is needed beyond the update itself.
+
 ## Multilingual Support (v0.12.0+)
 
 MCP Assist supports **21 languages** with localized configuration interfaces, language-aware system prompts, and region-specific speech detection patterns. The integration automatically detects your Home Assistant system language and provides appropriate defaults for system prompts, follow-up phrases, and end conversation words. Supported languages include: Arabic, Chinese (Simplified), Czech, Danish, Dutch, Finnish, Filipino, French, German, Greek, Hindi, Italian, Japanese, Korean, Norwegian, Polish, Portuguese, Russian, Spanish, Swedish, and Turkish.
 
 ## Requirements
 
-- Home Assistant 2024.1+
+- Home Assistant 2025.10+
 - One of:
   - **Local LLMs**: LM Studio v0.3.17+, llama.cpp, or Ollama
   - **Cloud LLMs**: OpenAI, Google Gemini, Anthropic Claude, or OpenRouter (API key required)
-- Python 3.11+
+- Python 3.13+ (the version Home Assistant 2025.10 runs on)
 
 ### Home Assistant 2026.10
 
-Version 0.22.0 records conversation tool results with the Home Assistant 2026.10 chat log API (`llm.ToolResult` on `ToolResultContent.result`). Home Assistant 2026.9 and older still receive the previous `tool_result` payload. Device and label lookups use `async_entries_for_area` and `async_entries_for_label`, so 2026.10 no longer logs the deprecated `device_registry.devices` mapping warning.
+Version 0.22.0 records conversation tool results with the Home Assistant 2026.10 chat log API (`llm.ToolResult` on `ToolResultContent.result`). Home Assistant 2026.9 and older still receive the previous `tool_result` payload. Device and label lookups use `async_entries_for_area` and `async_entries_for_label`, and devices are looked up one at a time with `async_get`, so 2026.10 no longer logs the deprecated `device_registry.devices` mapping warning. Since v0.24.3 the room of an entity or device comes from `async_get_effective_area_id` when Home Assistant has it (2026.9+), and entity aliases come from `async_get_entity_aliases` (2026.4+). Older versions use the entity, then device, area and the plain alias list.
 
 ## Installation
 

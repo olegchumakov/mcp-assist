@@ -14,21 +14,12 @@ from enum import Enum
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar, entity_registry as er, device_registry as dr
+from homeassistant.helpers import floor_registry as fr, label_registry as lr
 from homeassistant.components.homeassistant import async_should_expose
-
-try:
-    from homeassistant.helpers import floor_registry as fr
-except ImportError:  # pragma: no cover - older Home Assistant versions
-    fr = None
-
-try:
-    from homeassistant.helpers import label_registry as lr
-except ImportError:  # pragma: no cover - older Home Assistant versions
-    lr = None
 
 from .action_verify import listing_disposition, prepare_listed_entity
 from .const import MAX_ENTITIES_PER_DISCOVERY
-from .ha_compat import devices_in_area
+from .ha_compat import entity_aliases, entity_area_id
 from contextvars import ContextVar
 
 from .text_match import (
@@ -268,23 +259,18 @@ class SmartDiscovery:
         if not area_name:
             return None
 
-        get_by_name = getattr(area_registry, "async_get_area_by_name", None)
-        if get_by_name:
-            area_entry = get_by_name(area_name)
-            if area_entry:
-                return area_entry
+        area_entry = area_registry.async_get_area_by_name(area_name)
+        if area_entry:
+            return area_entry
 
-        get_by_alias = getattr(area_registry, "async_get_areas_by_alias", None)
-        if get_by_alias:
-            area_matches = get_by_alias(area_name)
-            if area_matches:
-                return area_matches[0]
+        area_matches = area_registry.async_get_areas_by_alias(area_name)
+        if area_matches:
+            return area_matches[0]
 
         for area_entry in area_registry.async_list_areas():
             if keys_equal(area_entry.name, area_name):
                 return area_entry
-            aliases = getattr(area_entry, "aliases", set()) or set()
-            if any_key_equal(area_name, aliases):
+            if any_key_equal(area_name, area_entry.aliases):
                 return area_entry
 
         if not fuzzy:
@@ -293,7 +279,7 @@ class SmartDiscovery:
             "area",
             area_name,
             area_registry.async_list_areas(),
-            lambda entry: [entry.name, *sorted(getattr(entry, "aliases", set()) or set())],
+            lambda entry: [entry.name, *sorted(entry.aliases)],
         )
 
     def _resolve_floor_entry(
@@ -303,23 +289,18 @@ class SmartDiscovery:
         if not floor_name or floor_registry is None:
             return None
 
-        get_by_name = getattr(floor_registry, "async_get_floor_by_name", None)
-        if get_by_name:
-            floor_entry = get_by_name(floor_name)
-            if floor_entry:
-                return floor_entry
+        floor_entry = floor_registry.async_get_floor_by_name(floor_name)
+        if floor_entry:
+            return floor_entry
 
-        get_by_alias = getattr(floor_registry, "async_get_floors_by_alias", None)
-        if get_by_alias:
-            floor_matches = get_by_alias(floor_name)
-            if floor_matches:
-                return floor_matches[0]
+        floor_matches = floor_registry.async_get_floors_by_alias(floor_name)
+        if floor_matches:
+            return floor_matches[0]
 
         for floor_entry in floor_registry.async_list_floors():
             if keys_equal(floor_entry.name, floor_name):
                 return floor_entry
-            aliases = getattr(floor_entry, "aliases", set()) or set()
-            if any_key_equal(floor_name, aliases):
+            if any_key_equal(floor_name, floor_entry.aliases):
                 return floor_entry
 
         if not fuzzy:
@@ -328,7 +309,7 @@ class SmartDiscovery:
             "floor",
             floor_name,
             floor_registry.async_list_floors(),
-            lambda entry: [entry.name, *sorted(getattr(entry, "aliases", set()) or set())],
+            lambda entry: [entry.name, *sorted(entry.aliases)],
         )
 
     def _resolve_label_entry(self, label_name: str, label_registry: Any) -> Any:
@@ -336,11 +317,9 @@ class SmartDiscovery:
         if not label_name or label_registry is None:
             return None
 
-        get_by_name = getattr(label_registry, "async_get_label_by_name", None)
-        if get_by_name:
-            label_entry = get_by_name(label_name)
-            if label_entry:
-                return label_entry
+        label_entry = label_registry.async_get_label_by_name(label_name)
+        if label_entry:
+            return label_entry
 
         for label_entry in label_registry.async_list_labels():
             if keys_equal(label_entry.name, label_name):
@@ -428,27 +407,17 @@ class SmartDiscovery:
         return sorted(label_names, key=str.casefold)
 
     def _get_entry_aliases(self, entry: Any) -> List[str]:
-        """Get aliases from a registry entry if supported."""
-        aliases = getattr(entry, "aliases", set()) if entry is not None else set()
-        return sorted(set(aliases or set()), key=str.casefold)
+        """Get aliases from an area or floor registry entry."""
+        if entry is None:
+            return []
+        return sorted(set(entry.aliases), key=str.casefold)
 
     def _get_entity_aliases(self, entity_entry: Any) -> List[str]:
         """Get resolved entity aliases."""
         if entity_entry is None:
             return []
 
-        get_entity_aliases = getattr(er, "async_get_entity_aliases", None)
-        if get_entity_aliases is not None:
-            try:
-                return get_entity_aliases(self.hass, entity_entry)
-            except Exception:  # pragma: no cover - defensive fallback
-                _LOGGER.debug("Falling back to raw entity aliases", exc_info=True)
-
-        aliases = getattr(entity_entry, "aliases", []) or []
-        return sorted(
-            {alias for alias in aliases if isinstance(alias, str)},
-            key=str.casefold,
-        )
+        return entity_aliases(self.hass, entity_entry)
 
     def _get_entity_context(
         self,
@@ -464,15 +433,11 @@ class SmartDiscovery:
         if entity_entry and entity_entry.device_id:
             device_entry = device_registry.async_get(entity_entry.device_id)
 
-        area_id = None
-        if entity_entry and entity_entry.area_id:
-            area_id = entity_entry.area_id
-        elif device_entry and device_entry.area_id:
-            area_id = device_entry.area_id
+        area_id = entity_area_id(self.hass, entity_entry) if entity_entry else None
 
         area_entry = area_registry.async_get_area(area_id) if area_id else None
 
-        floor_id = getattr(area_entry, "floor_id", None) if area_entry else None
+        floor_id = area_entry.floor_id if area_entry else None
         floor_name = None
         floor_entry = None
         if floor_id and floor_registry is not None:
@@ -481,14 +446,15 @@ class SmartDiscovery:
                 floor_name = floor_entry.name
 
         label_sources = {
-            "entity": set(getattr(entity_entry, "labels", set()) or set()),
-            "device": set(getattr(device_entry, "labels", set()) or set()),
-            "area": set(getattr(area_entry, "labels", set()) or set()),
+            "entity": set(entity_entry.labels) if entity_entry else set(),
+            "device": set(device_entry.labels) if device_entry else set(),
+            "area": set(area_entry.labels) if area_entry else set(),
         }
         label_ids = set().union(*label_sources.values())
         area_aliases = self._get_entry_aliases(area_entry)
         floor_aliases = self._get_entry_aliases(floor_entry)
-        device_aliases = self._get_entry_aliases(device_entry)
+        # Device registry entries have no aliases; keep the key for callers.
+        device_aliases: list[str] = []
 
         context = {
             "area": area_entry.name if area_entry else None,
@@ -769,8 +735,8 @@ class SmartDiscovery:
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
-        floor_registry = fr.async_get(self.hass) if fr else None
-        label_registry = lr.async_get(self.hass) if lr else None
+        floor_registry = fr.async_get(self.hass)
+        label_registry = lr.async_get(self.hass)
 
         # Handle if area is passed as list (defensive)
         if isinstance(area, list):
@@ -816,18 +782,12 @@ class SmartDiscovery:
 
             # Get entity's area
             entity_entry = entity_registry.async_get(entity_id)
-            entity_area_id = None
-
-            if entity_entry:
-                if entity_entry.area_id:
-                    entity_area_id = entity_entry.area_id
-                elif entity_entry.device_id:
-                    device_entry = device_registry.async_get(entity_entry.device_id)
-                    if device_entry and device_entry.area_id:
-                        entity_area_id = device_entry.area_id
+            current_area_id = (
+                entity_area_id(self.hass, entity_entry) if entity_entry else None
+            )
 
             # Check if entity is in the target area
-            if entity_area_id != area_id:
+            if current_area_id != area_id:
                 continue
 
             # Apply domain filter
@@ -894,8 +854,8 @@ class SmartDiscovery:
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
-        floor_registry = fr.async_get(self.hass) if fr else None
-        label_registry = lr.async_get(self.hass) if lr else None
+        floor_registry = fr.async_get(self.hass)
+        label_registry = lr.async_get(self.hass)
 
         # Get area ID if area name provided
         area_id = None
@@ -1126,8 +1086,8 @@ class SmartDiscovery:
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
         area_registry = ar.async_get(self.hass)
-        floor_registry = fr.async_get(self.hass) if fr else None
-        label_registry = lr.async_get(self.hass) if lr else None
+        floor_registry = fr.async_get(self.hass)
+        label_registry = lr.async_get(self.hass)
 
         entity_entry = entity_entry or entity_registry.async_get(state_obj.entity_id)
         if entity_context is None:
@@ -1240,8 +1200,8 @@ class SmartDiscovery:
         entity_registry = er.async_get(self.hass)
         area_registry = ar.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
-        floor_registry = fr.async_get(self.hass) if fr else None
-        label_registry = lr.async_get(self.hass) if lr else None
+        floor_registry = fr.async_get(self.hass)
+        label_registry = lr.async_get(self.hass)
 
         for entity_id in entity_ids:
             # Check if entity is exposed
@@ -1302,10 +1262,7 @@ class SmartDiscovery:
         """Area name for an entity, following its device when needed."""
         if entity_entry is None:
             return ""
-        area_id = getattr(entity_entry, "area_id", None)
-        if not area_id and getattr(entity_entry, "device_id", None):
-            device = dr.async_get(self.hass).async_get(entity_entry.device_id)
-            area_id = getattr(device, "area_id", None) if device else None
+        area_id = entity_area_id(self.hass, entity_entry)
         if not area_id:
             return ""
         area = ar.async_get(self.hass).async_get_area(area_id)
@@ -1338,38 +1295,32 @@ class SmartDiscovery:
         """List all areas with entity counts."""
         area_registry = ar.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
-        device_registry = dr.async_get(self.hass)
-        floor_registry = fr.async_get(self.hass) if fr else None
-        label_registry = lr.async_get(self.hass) if lr else None
+        floor_registry = fr.async_get(self.hass)
+        label_registry = lr.async_get(self.hass)
+
+        # Group entities by their effective area (own area, else the device's,
+        # else the parent device's on cores with child devices).
+        entities_by_area: dict[str, list[Any]] = {}
+        for entity_entry in entity_registry.entities.values():
+            if current_area_id := entity_area_id(self.hass, entity_entry):
+                entities_by_area.setdefault(current_area_id, []).append(entity_entry)
 
         areas = []
-        for area_entry in area_registry.areas.values():
-            # Count entities in this area
-            entity_count = 0
+        for area_entry in area_registry.async_list_areas():
+            entity_count = sum(
+                1
+                for entity_entry in entities_by_area.get(area_entry.id, [])
+                if self._listable(entity_entry.entity_id, entity_entry, area_entry.name)
+            )
 
-            # Count entities directly assigned to area
-            for entity_entry in entity_registry.entities.values():
-                if entity_entry.area_id == area_entry.id:
-                    if self._listable(entity_entry.entity_id, entity_entry, area_entry.name):
-                        entity_count += 1
-
-            # Count entities via devices in this area. async_entries_for_area
-            # avoids deprecated mapping access on device_registry.devices.
-            for device_entry in devices_in_area(device_registry, area_entry.id):
-                for entity_entry in entity_registry.entities.values():
-                    if (entity_entry.device_id == device_entry.id
-                        and not entity_entry.area_id  # Not already counted
-                        and self._listable(entity_entry.entity_id, entity_entry, area_entry.name)):
-                        entity_count += 1
-
-            floor_id = getattr(area_entry, "floor_id", None)
+            floor_id = area_entry.floor_id
             floor_name = None
             if floor_id and floor_registry is not None:
                 floor_entry = floor_registry.async_get_floor(floor_id)
                 if floor_entry:
                     floor_name = floor_entry.name
 
-            label_ids = set(getattr(area_entry, "labels", set()) or set())
+            label_ids = set(area_entry.labels)
 
             areas.append({
                 "id": area_entry.id,
@@ -1414,7 +1365,6 @@ class SmartDiscovery:
         """Get all entities in a specific area by area ID."""
         entities = []
         entity_registry = er.async_get(self.hass)
-        device_registry = dr.async_get(self.hass)
         area_registry = ar.async_get(self.hass)
         area_entry = area_registry.async_get_area(area_id)
         if area_entry is None:
@@ -1426,17 +1376,11 @@ class SmartDiscovery:
 
         for state in self.hass.states.async_all():
             entity_entry = entity_registry.async_get(state.entity_id)
-            entity_area_id = None
+            current_area_id = (
+                entity_area_id(self.hass, entity_entry) if entity_entry else None
+            )
 
-            if entity_entry:
-                if entity_entry.area_id:
-                    entity_area_id = entity_entry.area_id
-                elif entity_entry.device_id:
-                    device_entry = device_registry.async_get(entity_entry.device_id)
-                    if device_entry and device_entry.area_id:
-                        entity_area_id = device_entry.area_id
-
-            if entity_area_id == area_id:
+            if current_area_id == area_id:
                 # Skip unavailable entities that have no human name.
                 if self._listable(state.entity_id, entity_entry, area_name):
                     entities.append({
