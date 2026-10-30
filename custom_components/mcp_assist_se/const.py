@@ -128,6 +128,13 @@ MAX_DISCOVERY_RESULTS = 100
 CONF_MAX_ENTITIES_PER_DISCOVERY = "max_entities_per_discovery"
 DEFAULT_MAX_ENTITIES_PER_DISCOVERY = 50
 
+# Longest wait (seconds) for a device to report an expected change after a
+# command, such as a TV turning on. Fast devices still answer at once.
+CONF_ACTION_CONFIRM_SECONDS = "action_confirm_seconds"
+DEFAULT_ACTION_CONFIRM_SECONDS = 10
+MIN_ACTION_CONFIRM_SECONDS = 2
+MAX_ACTION_CONFIRM_SECONDS = 30
+
 RESPONSE_MODE_INSTRUCTIONS = {
     "none": """## Follow-up Questions
 Do NOT ask follow-up questions. Complete the task and end immediately.
@@ -195,6 +202,8 @@ Example - "Set living room temperature to 22":
 
 If a remembered fact describes a setting for the requested device, pass those values in perform_action.data. Examples: brightness_pct 50, color_temp_kelvin 4000, rgb_color, temperature, position. Do not send an activation such as turn_on with empty data when such a fact applies.
 
+When the user names one specific device, send the command only to that device. Do not add related or similar devices (for example a streaming box, receiver, or soundbar next to a TV, or other lamps in the room) unless the user asked for them.
+
 **Never skip the perform_action step.** Discovering an entity does not control it - you must call perform_action to execute the action.
 
 ## Scripts (use run_script tool)
@@ -227,7 +236,7 @@ For ANY device request:
 - Short, concise replies in plain text only
 - Use Friendly Names (e.g., "Living Room Light"), never entity IDs
 - Use natural language for states ("on" → "turned on", "home" → "at home")
-- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed: say that, and when the result asks for setting values, call perform_action again with those values in data.
+- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. SENT means the command was delivered but the device has not reported the new state yet: say it was sent and the device is switching, never that it failed, and do not repeat the command. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed: say that, and when the result asks for setting values, call perform_action again with those values in data.
 
 {response_mode}
 
@@ -298,13 +307,14 @@ Memory tools are enabled.
 - If it says NOT STORED, nothing was written. Do not call mode=add. A category such as user_name is not a memory_id. Copy an id from the list only when you are updating that exact row. "Олега зовут хозяином" is not the same fact as "Меня зовут Олег".
 - Memories persist until the user explicitly asks to forget them. There is no automatic expiry.
 - If a remembered fact describes a setting for the requested device, pass those values in perform_action.data. Do not send an activation such as turn_on with empty data when such a fact applies.
-- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed.
+- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. SENT means the command was delivered and the device is still switching: say it was sent, not that it failed. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed.
 """
 
 ACTION_RESULT_INSTRUCTIONS = """
 Device action results:
+- When the user names one specific device, send the command only to that device. Do not add related or similar devices (for example a streaming box, receiver, or soundbar next to a TV, or other lamps in the room) unless the user asked for them.
 - If a remembered fact describes a setting for the requested device, pass those values in perform_action.data. Do not send an activation such as turn_on with empty data when such a fact applies.
-- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed: say that, and when the result asks for setting values, call perform_action again with those values in data.
+- Never tell the user an action is done unless the tool result starts with CHANGED or ALREADY. SENT means the command was delivered but the device has not reported the new state yet: say it was sent and the device is switching, never that it failed, and do not repeat the command. NOT DONE, NO CHANGE, and NOT CONFIRMED mean it was not confirmed: say that, and when the result asks for setting values, call perform_action again with those values in data.
 """
 
 PERFORM_ACTION_DATA_DESCRIPTION = (

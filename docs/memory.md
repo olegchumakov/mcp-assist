@@ -38,7 +38,7 @@ The block does not replace device-control rules. The assistant still has to disc
 
 If a remembered fact describes a setting for the device the user just asked for, the model is told to put those values in `perform_action` data. An activation with empty data is refused when one of the facts injected on that turn names the target and contains a number. The check uses the fact text and the entity's name, alias, or area. It does not depend on a fixed list of device words or setting values.
 
-`perform_action` then compares state before and after the call. `CHANGED` and `ALREADY` are the only results that mean the request is done. `NO CHANGE` means the device was already in that state and no setting values were sent. `NOT DONE` means the target is unavailable or the call was refused. `NOT CONFIRMED` means a change was expected and no state report showed it. The model is told to say that plainly.
+`perform_action` then compares state before and after the call. `CHANGED` and `ALREADY` are the only results that mean the request is done. `NO CHANGE` means the device was already in that state and no setting values were sent. `NOT DONE` means the target is unavailable or the call was refused. `SENT` means the service call went through but the device has not reported the change within the wait (see **Wait for slow devices** in the shared settings); the model says the command was sent and does not call it a failure. `NOT CONFIRMED` is left for a call with no entity state to check. The model is told to say that plainly.
 
 Discovery and the entity index leave out unavailable entities that have no friendly name, alias, or area. A name that is only the entity id or an IEEE address does not count. Other unavailable entities are listed and marked unavailable.
 
