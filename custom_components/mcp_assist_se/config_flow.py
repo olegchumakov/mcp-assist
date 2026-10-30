@@ -75,6 +75,10 @@ from .const import (
     CONF_ENABLE_GAP_FILLING,
     CONF_MAX_ENTITIES_PER_DISCOVERY,
     DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
+    CONF_ACTION_CONFIRM_SECONDS,
+    DEFAULT_ACTION_CONFIRM_SECONDS,
+    MIN_ACTION_CONFIRM_SECONDS,
+    MAX_ACTION_CONFIRM_SECONDS,
     CONF_OLLAMA_KEEP_ALIVE,
     CONF_OLLAMA_NUM_CTX,
     CONF_FOLLOW_UP_PHRASES,
@@ -1336,6 +1340,15 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=DEFAULT_MAX_ENTITIES_PER_DISCOVERY,
                 ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
                 vol.Optional(
+                    CONF_ACTION_CONFIRM_SECONDS,
+                    default=DEFAULT_ACTION_CONFIRM_SECONDS,
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=MIN_ACTION_CONFIRM_SECONDS, max=MAX_ACTION_CONFIRM_SECONDS
+                    ),
+                ),
+                vol.Optional(
                     CONF_SEARXNG_URL,
                     default=DEFAULT_SEARXNG_URL
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
@@ -2064,6 +2077,21 @@ class MCPAssistOptionsFlow(AccessOptionsMixin, config_entries.OptionsFlow):
                         ),
                     ),
                 ): vol.All(vol.Coerce(int), vol.Range(min=20, max=500)),
+                vol.Optional(
+                    CONF_ACTION_CONFIRM_SECONDS,
+                    default=sys_options.get(
+                        CONF_ACTION_CONFIRM_SECONDS,
+                        sys_data.get(
+                            CONF_ACTION_CONFIRM_SECONDS,
+                            DEFAULT_ACTION_CONFIRM_SECONDS,
+                        ),
+                    ),
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=MIN_ACTION_CONFIRM_SECONDS, max=MAX_ACTION_CONFIRM_SECONDS
+                    ),
+                ),
             }
         )
 

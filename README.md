@@ -67,7 +67,7 @@ Embeddings are computed **on this Home Assistant** by default. Nothing is sent t
 
 The default model is [`sergeyzh/rubert-tiny-turbo`](https://huggingface.co/sergeyzh/rubert-tiny-turbo): a Russian sentence model, about 29M parameters, 312 dimensions, 3 layers. First run downloads **about 118 MB** into `/config/mcp_assist_se/models/` and then keeps **about 180 MB** of RAM while it is loaded. Loading is lazy and happens in a background thread, so the conversation is not blocked. Until the model is ready, retrieval falls back to the existing keyword ranker. Later turns use the cached vectors. Vectors are stored on each memory together with the model id, so changing the model recomputes them. Existing memories and settings are kept. Remembering a fact is one server-side decision: an exact or near-identical copy is left as it is, and `mode=add` cannot skip that check. After the model loads, only near-identical copies (0.91 or higher) are merged automatically, and each removed line is logged. Forgetting matches Russian word forms, so «пиратов» finds a memory that says «пират». A forget that matches nothing tells the model that nothing was deleted.
 
-`perform_action` reads the entity before and after the service call. The result is `CHANGED` or `ALREADY` only when the state or the requested settings match. A call that leaves the device as it was is `NO CHANGE`. An unavailable target, or an activation with no settings while a remembered fact for that device contains settings, is `NOT DONE` and the service is not called. If a change was requested and no state report arrives, the result is `NOT CONFIRMED`. The model is told not to claim the action is done unless the result says `CHANGED` or `ALREADY`. Discovery and the entity index omit unavailable entities that have no friendly name, alias, or area, including ones whose only name is an IEEE address. Other unavailable entities stay in the list and are marked unavailable.
+`perform_action` reads the entity before and after the service call. The result is `CHANGED` or `ALREADY` only when the state or the requested settings match. A call that leaves the device as it was is `NO CHANGE`. An unavailable target, or an activation with no settings while a remembered fact for that device contains settings, is `NOT DONE` and the service is not called. If the service call went through but the device has not reported the change yet, the result is `SENT` (since v0.24.2): the model says the command was sent instead of saying it failed. The model is told not to claim the action is done unless the result says `CHANGED` or `ALREADY`. Discovery and the entity index omit unavailable entities that have no friendly name, alias, or area, including ones whose only name is an IEEE address. Other unavailable entities stay in the list and are marked unavailable.
 
 ONNX Runtime is not used. It has no musl wheels, and Home Assistant OS is Alpine, so it would fail to install. The integration runs the BERT network with NumPy plus the `tokenizers` and `safetensors` packages, which publish wheels for x86_64 and aarch64 on both musl and glibc. PyTorch is not installed.
 
@@ -95,6 +95,17 @@ The mark format and the HMAC test vectors are in [SPEC.md](SPEC.md). The canonic
 
 - The voice-access settings are written in everyday language. Each field says what it is for, whether you have to fill it in, and what happens if you leave it empty. The address field only copies the list of known voices so you can pick people. Who is speaking still comes with each phrase when that address is empty.
 - A person's name matches whether or not the capitals agree. «олег» is the same person as «Олег». Extra spaces are ignored. This applies to a spoken name, a typed Home Assistant user, the voice list, and duplicate names.
+
+## Waiting for slow devices (v0.24.2)
+
+Some devices take a few seconds to show that a command worked. A TV switched on by infrared, for example, often only counts as "on" once a smart plug reports its power draw.
+
+- After a command, the assistant now watches each device it controlled and stops waiting the moment that device reports the expected state. Lights and other fast devices still answer right away.
+- If a change is expected (turning on, opening, starting, a new brightness, and so on), it waits up to **Wait for slow devices (seconds)**, 10 seconds by default. You can change it from 2 to 30 in the shared MCP server settings. The change applies to the next command; no restart is needed.
+- If the device still has not reported, the result is `SENT`, not a failure. The assistant says the command was sent and the device is switching on, and does not repeat it. "Didn't work" is kept for real errors and unavailable devices.
+- Each device is checked on its own. One device changing quickly no longer ends the wait for the others.
+- When you name one device, the assistant is told to control only that device and not add related ones, such as a streaming box next to the TV.
+- With debug logging on, each checked device logs one line with what was expected, the outcome, and how many seconds it took.
 
 ## Multilingual Support (v0.12.0+)
 
@@ -279,6 +290,7 @@ Temperature controls response randomness (0.0 = deterministic, 1.0 = creative). 
 ### MCP Server Settings
 - **MCP Server Port**: Default 8090 (change if port conflict)
 - **Additional Allowed IPs/Ranges**: Whitelist Docker containers (e.g., `172.30.0.0/16`) or specific IPs for external MCP clients like Claude Code add-on
+- **Wait for slow devices (seconds)**: The longest time the assistant waits for a device to confirm a command, such as a TV that takes a few seconds to turn on. Default 10, range 2-30. Fast devices answer as soon as they report. If time runs out, the assistant says the command was sent rather than that it failed.
 
 ### Web Search
 - **Web Search Provider**: Choose between:

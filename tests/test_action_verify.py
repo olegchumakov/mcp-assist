@@ -18,6 +18,14 @@ if "mcp_assist_se" not in sys.modules:
     sys.modules["mcp_assist_se"] = package
 
 from mcp_assist_se.action_verify import (
+    CONFIRM_WAIT_SECONDS,
+    SETTLED_WAIT_SECONDS,
+    WAIT_EXPECT,
+    WAIT_OBSERVE,
+    WAIT_SETTLE,
+    confirm_wait_seconds,
+    delivered_status,
+    expected_label,
     fact_names_entity,
     guard_empty_activation,
     judge_entity,
@@ -25,6 +33,8 @@ from mcp_assist_se.action_verify import (
     prepare_listed_entity,
     render_verification,
     snapshot_from_mapping,
+    wait_plan,
+    wait_satisfied,
 )
 from mcp_assist_se.const import (
     ACTION_RESULT_INSTRUCTIONS,
@@ -340,6 +350,126 @@ class ListingFilterTests(unittest.TestCase):
         self.assertIsNotNone(prepare_listed_entity(info))
 
 
+class SentStatusTests(unittest.TestCase):
+    def _tv(self, state: str, **extra):
+        raw = {
+            "entity_id": "media_player.living_room_tv",
+            "state": state,
+            "name": "Living room TV",
+            "friendly_name": "Living room TV",
+            "attributes": {"friendly_name": "Living room TV"},
+        }
+        raw.update(extra)
+        return snapshot_from_mapping(raw)
+
+    def test_unconfirmed_change_after_a_good_call_is_sent_not_an_error(self) -> None:
+        before = self._tv("off")
+        status = delivered_status(judge_entity("turn_on", {}, before, before))
+        self.assertEqual(status, "sent")
+        text, is_error, overall = render_verification(
+            [{"status": status, "before": before, "after": before, "waited": 10.0}]
+        )
+        self.assertEqual(overall, "sent")
+        self.assertFalse(is_error)
+        self.assertTrue(text.startswith("SENT"))
+        self.assertIn("Do not say it failed", text)
+        self.assertIn("do not send the command again", text)
+        self.assertIn("after 10 s", text)
+        self.assertNotIn("Do not say the action was done", text)
+
+    def test_delivered_status_keeps_other_outcomes(self) -> None:
+        for status in ("changed", "already", "no_change", "not_done"):
+            self.assertEqual(delivered_status(status), status)
+
+    def test_unavailable_still_fails(self) -> None:
+        before = self._tv("unavailable")
+        status = delivered_status(judge_entity("turn_on", {}, before, before))
+        self.assertEqual(status, "not_done")
+        _text, is_error, _overall = render_verification(
+            [{"status": status, "before": before, "after": before}]
+        )
+        self.assertTrue(is_error)
+
+    def test_target_that_goes_unavailable_after_the_call_is_not_done(self) -> None:
+        before = self._tv("off")
+        after = self._tv("unavailable")
+        self.assertEqual(judge_entity("turn_on", {}, before, after), "not_done")
+        text, is_error, _overall = render_verification(
+            [{"status": "not_done", "before": before, "after": after}]
+        )
+        self.assertTrue(is_error)
+        self.assertIn("is unavailable", text)
+
+    def test_mixed_rows_report_sent_overall(self) -> None:
+        tv = self._tv("off")
+        lamp_before = _lamp(state="off", attributes={"friendly_name": "Kitchen lamp"})
+        lamp_after = _lamp()
+        _text, is_error, overall = render_verification(
+            [
+                {"status": "sent", "before": tv, "after": tv},
+                {"status": "changed", "before": lamp_before, "after": lamp_after},
+            ]
+        )
+        self.assertEqual(overall, "sent")
+        self.assertFalse(is_error)
+
+
+class WaitPlanTests(unittest.TestCase):
+    def test_expected_change_waits_up_to_the_configured_time(self) -> None:
+        before = _lamp(state="off", attributes={"friendly_name": "Kitchen lamp"})
+        self.assertEqual(wait_plan("turn_on", {}, before, 9), (WAIT_EXPECT, 9.0))
+        self.assertEqual(wait_plan("toggle", {}, before, 9), (WAIT_EXPECT, 9.0))
+
+    def test_expected_wait_is_never_shorter_than_the_quick_wait(self) -> None:
+        before = _lamp(state="off", attributes={"friendly_name": "Kitchen lamp"})
+        self.assertEqual(
+            wait_plan("turn_on", {}, before, 0.5), (WAIT_EXPECT, CONFIRM_WAIT_SECONDS)
+        )
+
+    def test_nothing_to_change_only_settles(self) -> None:
+        before = _lamp()
+        self.assertEqual(
+            wait_plan("turn_on", {}, before, 10), (WAIT_SETTLE, SETTLED_WAIT_SECONDS)
+        )
+
+    def test_unpredictable_action_gets_the_quick_wait(self) -> None:
+        before = _lamp()
+        self.assertEqual(
+            wait_plan("volume_up", {}, before, 10), (WAIT_OBSERVE, CONFIRM_WAIT_SECONDS)
+        )
+
+    def test_satisfied_needs_the_expected_state_not_just_any_report(self) -> None:
+        before = snapshot_from_mapping(
+            {"entity_id": "cover.door", "state": "closed", "name": "Door"}
+        )
+        opening = snapshot_from_mapping(
+            {"entity_id": "cover.door", "state": "opening", "name": "Door"}
+        )
+        opened = snapshot_from_mapping(
+            {"entity_id": "cover.door", "state": "open", "name": "Door"}
+        )
+        self.assertFalse(wait_satisfied(WAIT_EXPECT, "open", {}, before, opening))
+        self.assertTrue(wait_satisfied(WAIT_EXPECT, "open", {}, before, opened))
+        self.assertTrue(wait_satisfied(WAIT_OBSERVE, "open", {}, before, opening))
+        self.assertFalse(wait_satisfied(WAIT_SETTLE, "open", {}, before, opened))
+
+    def test_confirm_wait_is_clamped(self) -> None:
+        self.assertEqual(confirm_wait_seconds(10), 10.0)
+        self.assertEqual(confirm_wait_seconds("8"), 8.0)
+        self.assertEqual(confirm_wait_seconds(0), 2.0)
+        self.assertEqual(confirm_wait_seconds(999), 30.0)
+        self.assertEqual(confirm_wait_seconds(None), 10.0)
+        self.assertEqual(confirm_wait_seconds("abc"), 10.0)
+
+    def test_expected_label(self) -> None:
+        self.assertEqual(expected_label("turn_on", {}), "on")
+        self.assertEqual(expected_label("toggle", {}), "toggled")
+        self.assertEqual(
+            expected_label("turn_on", {"brightness_pct": 50}), "on + settings brightness_pct"
+        )
+        self.assertEqual(expected_label("volume_up", None), "any change")
+
+
 class PromptRuleTests(unittest.TestCase):
     def test_rules_are_generic(self) -> None:
         blob = "\n".join(
@@ -358,6 +488,9 @@ class PromptRuleTests(unittest.TestCase):
         self.assertIn("NO CHANGE", ACTION_RESULT_INSTRUCTIONS)
         self.assertIn("NOT DONE", ACTION_RESULT_INSTRUCTIONS)
         self.assertIn("NOT CONFIRMED", ACTION_RESULT_INSTRUCTIONS)
+        self.assertIn("SENT", ACTION_RESULT_INSTRUCTIONS)
+        self.assertIn("only to that device", ACTION_RESULT_INSTRUCTIONS)
+        self.assertIn("only to that device", DEFAULT_TECHNICAL_PROMPT)
         self.assertIn("brightness_pct", PERFORM_ACTION_DATA_DESCRIPTION)
         self.assertIn("50", PERFORM_ACTION_DATA_DESCRIPTION)
         self.assertIn("4000", PERFORM_ACTION_DATA_DESCRIPTION)

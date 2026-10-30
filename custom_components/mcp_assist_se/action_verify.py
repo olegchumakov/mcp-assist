@@ -6,14 +6,24 @@ entity snapshots and whatever remembered facts were injected on this turn.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
 from .memory_rank import content_stems, fold_token, stems_match
 
+# Quick wait for actions whose outcome we cannot predict (volume_up, play_media).
 CONFIRM_WAIT_SECONDS = 2.0
+# Short wait when nothing should change, to catch a late report.
 SETTLED_WAIT_SECONDS = 0.25
-POLL_SECONDS = 0.2
+# Longest wait for an expected change. The shared option overrides it.
+EXPECTED_CHANGE_WAIT_SECONDS = 10.0
+MIN_EXPECTED_CHANGE_WAIT_SECONDS = 2.0
+MAX_EXPECTED_CHANGE_WAIT_SECONDS = 30.0
+
+WAIT_EXPECT = "expect"
+WAIT_OBSERVE = "observe"
+WAIT_SETTLE = "settle"
 
 _DEAD_STATES = frozenset({"unavailable", "unknown"})
 _ACTIVATION_ACTIONS = frozenset({"turn_on", "open", "unlock", "start", "play"})
@@ -58,6 +68,7 @@ _SUMMARY_ATTRS = (
 _ERROR_STATUSES = frozenset({"not_done", "no_change", "not_confirmed"})
 _STATUS_LABEL = {
     "changed": "CHANGED",
+    "sent": "SENT",
     "already": "ALREADY",
     "no_change": "NO CHANGE",
     "not_done": "NOT DONE",
@@ -348,8 +359,12 @@ def judge_entity(
     before: dict[str, Any],
     after: dict[str, Any],
 ) -> str:
-    """One of changed, already, no_change, not_done, not_confirmed."""
-    if is_dead_snapshot(before):
+    """One of changed, already, no_change, not_done, not_confirmed.
+
+    not_confirmed only means the state did not show the change yet. The
+    caller turns it into sent when the service call itself succeeded.
+    """
+    if is_dead_snapshot(before) or is_dead_snapshot(after):
         return "not_done"
     payload = observable_settings(data, before)
     expected = implied_state(action)
@@ -386,6 +401,87 @@ def judge_entity(
     return "not_confirmed"
 
 
+def expected_label(action: str, data: dict[str, Any] | None) -> str:
+    """Short text for the debug log: what the check waits for."""
+    if str(action or "") == "toggle":
+        return "toggled"
+    expected = implied_state(action)
+    parts = [expected] if expected else []
+    if data:
+        parts.append("settings " + ",".join(sorted(str(key) for key in data)))
+    return " + ".join(parts) or "any change"
+
+
+def delivered_status(status: str) -> str:
+    """Status after a service call that returned without an error.
+
+    A change that did not show up in time is reported as sent, not as a
+    failure: slow devices (IR, cloud, devices behind a power meter) often
+    report their new state seconds later.
+    """
+    return "sent" if status == "not_confirmed" else status
+
+
+def confirm_wait_seconds(value: Any) -> float:
+    """The configured longest wait, clamped to a sane range."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return EXPECTED_CHANGE_WAIT_SECONDS
+    if math.isnan(seconds):
+        return EXPECTED_CHANGE_WAIT_SECONDS
+    return max(
+        MIN_EXPECTED_CHANGE_WAIT_SECONDS,
+        min(MAX_EXPECTED_CHANGE_WAIT_SECONDS, seconds),
+    )
+
+
+def _has_known_outcome(action: str, data: dict[str, Any] | None, before: dict[str, Any]) -> bool:
+    if str(action or "") == "toggle":
+        return True
+    if implied_state(action) is not None:
+        return True
+    return bool(observable_settings(data, before))
+
+
+def wait_plan(
+    action: str,
+    data: dict[str, Any] | None,
+    before: dict[str, Any],
+    expected_wait: float = EXPECTED_CHANGE_WAIT_SECONDS,
+) -> tuple[str, float]:
+    """How to wait for one target: (mode, longest wait in seconds).
+
+    expect: a change is expected (for example turn_on of an off device).
+        Wait until it shows, up to expected_wait.
+    observe: the outcome cannot be predicted from the call. Wait a short
+        time for any value to change.
+    settle: nothing should change. Wait briefly for a late report.
+    """
+    if is_dead_snapshot(before):
+        return WAIT_SETTLE, 0.0
+    if expects_change(action, data, before):
+        return WAIT_EXPECT, max(CONFIRM_WAIT_SECONDS, float(expected_wait))
+    if _has_known_outcome(action, data, before):
+        return WAIT_SETTLE, SETTLED_WAIT_SECONDS
+    return WAIT_OBSERVE, CONFIRM_WAIT_SECONDS
+
+
+def wait_satisfied(
+    mode: str,
+    action: str,
+    data: dict[str, Any] | None,
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> bool:
+    """True when waiting for this target can stop early."""
+    if mode == WAIT_EXPECT:
+        return judge_entity(action, data, before, after) in {"changed", "already"}
+    if mode == WAIT_OBSERVE:
+        return values_changed(before, after)
+    return False
+
+
 def _summary(snapshot: dict[str, Any]) -> str:
     parts = [str(snapshot.get("state") or "unknown")]
     attributes = snapshot.get("attributes") or {}
@@ -416,6 +512,8 @@ def _overall_status(statuses: list[str]) -> str:
         return "not_done"
     if any(status == "not_confirmed" for status in statuses):
         return "not_confirmed"
+    if any(status == "sent" for status in statuses):
+        return "sent"
     if any(status == "changed" for status in statuses):
         return "changed"
     if any(status == "no_change" for status in statuses):
@@ -446,6 +544,14 @@ def render_verification(
             "The requested change was not confirmed by a state report. "
             "Do not say the action was done."
         )
+    elif status == "sent":
+        lines.append(
+            "The command was delivered without an error, but the device has not "
+            "reported the new state yet. Some devices take several seconds, for "
+            "example a TV or a device controlled by infrared. Tell the user the "
+            "command was sent and the device is switching or should respond "
+            "shortly. Do not say it failed, and do not send the command again."
+        )
     elif status == "already":
         lines.append("The target already matches the requested settings.")
     else:
@@ -457,11 +563,21 @@ def render_verification(
         row_status = str(row.get("status") or "")
         label = _label(before)
         if row_status == "not_done":
-            lines.append(f"{label} is {before.get('state') or 'unknown'} and was not changed.")
+            dead = after if is_dead_snapshot(after) else before
+            lines.append(f"{label} is {dead.get('state') or 'unknown'} and was not changed.")
         elif row_status == "no_change":
             lines.append(f"{label} was already {_summary(before)}.")
         elif row_status == "not_confirmed":
             lines.append(f"{label} is still {_summary(after)}.")
+        elif row_status == "sent":
+            waited = row.get("waited")
+            if waited is not None:
+                lines.append(
+                    f"{label}: command sent; after {waited:.0f} s it still reports "
+                    f"{_summary(after)}."
+                )
+            else:
+                lines.append(f"{label}: command sent; it still reports {_summary(after)}.")
         elif row_status == "already":
             lines.append(f"{label} already matches ({_summary(after)}).")
         else:

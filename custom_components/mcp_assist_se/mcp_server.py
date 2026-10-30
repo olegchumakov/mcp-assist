@@ -13,7 +13,8 @@ from datetime import timedelta
 from aiohttp import web, WSMsgType
 from aiohttp.web_ws import WebSocketResponse
 
-from homeassistant.core import HomeAssistant, SupportsResponse
+from homeassistant.core import HomeAssistant, SupportsResponse, callback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
@@ -38,20 +39,23 @@ from .access_control import (
 )
 from .access_hass import snapshot_from_hass
 from .action_verify import (
-    CONFIRM_WAIT_SECONDS,
-    POLL_SECONDS,
-    SETTLED_WAIT_SECONDS,
-    expects_change,
+    confirm_wait_seconds,
+    delivered_status,
     facts_from_context,
     guard_empty_activation,
+    expected_label,
     is_dead_snapshot,
     judge_entity,
-    observation_changed,
     public_snapshot,
     render_verification,
     snapshot_from_mapping,
+    wait_plan,
+    wait_satisfied,
 )
+from .action_wait import wait_for_targets
 from .const import (
+    CONF_ACTION_CONFIRM_SECONDS,
+    DEFAULT_ACTION_CONFIRM_SECONDS,
     MCP_SERVER_NAME,
     MCP_PROTOCOL_VERSION,
     MAX_ENTITIES_PER_DISCOVERY,
@@ -1915,7 +1919,11 @@ class MCPServer:
             },
             {
                 "name": "perform_action",
-                "description": "Control Home Assistant devices by calling services. Use after discovering entities to turn on/off lights, set temperatures, open/close covers, etc.",
+                "description": (
+                    "Control Home Assistant devices by calling services. Use after discovering entities to turn on/off lights, set temperatures, open/close covers, etc. "
+                    "When the user names one specific device, target only that device; do not add related devices the user did not ask for. "
+                    "A SENT result means the command was delivered and the device is still switching: say it was sent, not that it failed."
+                ),
                 "inputSchema": {
                     "$schema": "http://json-schema.org/draft-07/schema#",
                     "type": "object",
@@ -2889,29 +2897,54 @@ class MCPServer:
             }
         )
 
+    def _confirm_wait_seconds(self) -> float:
+        """Longest wait for a device to report an expected change (shared option)."""
+        return confirm_wait_seconds(
+            self._get_shared_setting(
+                CONF_ACTION_CONFIRM_SECONDS, DEFAULT_ACTION_CONFIRM_SECONDS
+            )
+        )
+
     async def _wait_for_state_reports(
         self,
         entity_ids: List[str],
         before: Dict[str, Dict[str, Any]],
-        timeout: float,
-    ) -> Dict[str, Dict[str, Any]]:
-        """Poll until a snapshot changes or the wait expires."""
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
-        latest = {entity_id: before[entity_id] for entity_id in entity_ids}
-        while True:
-            latest = {
-                entity_id: self._snapshot_entity(entity_id) for entity_id in entity_ids
-            }
-            if any(
-                observation_changed(before[entity_id], latest[entity_id])
-                for entity_id in entity_ids
-            ):
-                return latest
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                return latest
-            await asyncio.sleep(min(POLL_SECONDS, remaining))
+        *,
+        service: str,
+        data: dict[str, Any],
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, float], dict[str, str]]:
+        """Wait for each target on its own, woken by state change events."""
+        expected_wait = self._confirm_wait_seconds()
+        plans = {
+            entity_id: wait_plan(service, data, before[entity_id], expected_wait)
+            for entity_id in entity_ids
+        }
+
+        def _satisfied(
+            _entity_id: str,
+            mode: str,
+            old: dict[str, Any],
+            new: dict[str, Any],
+        ) -> bool:
+            return wait_satisfied(mode, service, data, old, new)
+
+        def _subscribe(ids: list[str], on_change: Any) -> Any:
+            @callback
+            def _state_changed(event: Any) -> None:
+                on_change(event)
+
+            return async_track_state_change_event(self.hass, ids, _state_changed)
+
+        latest, waited, _confirmed = await wait_for_targets(
+            entity_ids,
+            before,
+            plans,
+            self._snapshot_entity,
+            _satisfied,
+            _subscribe,
+        )
+        modes = {entity_id: plans[entity_id][0] for entity_id in entity_ids}
+        return latest, waited, modes
 
     async def _execute_verified_action(
         self,
@@ -2997,15 +3030,9 @@ class MCPServer:
                 "action_result": {"status": "not_confirmed", "entities": []},
             }
 
-        timeout = (
-            CONFIRM_WAIT_SECONDS
-            if any(
-                expects_change(service, data, before[entity_id])
-                for entity_id in live_ids
-            )
-            else SETTLED_WAIT_SECONDS
+        after, waited, modes = await self._wait_for_state_reports(
+            live_ids, before, service=service, data=data
         )
-        after = await self._wait_for_state_reports(live_ids, before, timeout)
         rows = []
         for entity_id, snapshot in before.items():
             if is_dead_snapshot(snapshot):
@@ -3014,11 +3041,26 @@ class MCPServer:
                 )
                 continue
             later = after.get(entity_id, snapshot)
+            # The service call returned without an error, so a change that
+            # has not shown up yet is "sent", not a failure.
+            status = delivered_status(judge_entity(service, data, snapshot, later))
+            seconds = waited.get(entity_id)
+            _LOGGER.debug(
+                "Action check %s.%s %s: expected=%s wait=%s outcome=%s after=%.2fs",
+                domain,
+                service,
+                entity_id,
+                expected_label(service, data),
+                modes.get(entity_id),
+                status,
+                seconds if seconds is not None else 0.0,
+            )
             rows.append(
                 {
-                    "status": judge_entity(service, data, snapshot, later),
+                    "status": status,
                     "before": snapshot,
                     "after": later,
+                    "waited": seconds,
                 }
             )
         result = self._verification_result(rows)
