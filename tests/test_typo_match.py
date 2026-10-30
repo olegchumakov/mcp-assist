@@ -69,11 +69,18 @@ def _names(entry):
 
 
 def _area(area_id, name, aliases=()):
-    return SimpleNamespace(id=area_id, name=name, aliases=set(aliases), floor_id=None)
+    return SimpleNamespace(
+        id=area_id, name=name, aliases=set(aliases), floor_id=None, labels=set()
+    )
 
 
 def _floor(floor_id, name, aliases=()):
     return SimpleNamespace(floor_id=floor_id, name=name, aliases=set(aliases))
+
+
+def _normalized(name):
+    """Home Assistant registries compare names casefolded without spaces."""
+    return "".join(name.casefold().split())
 
 
 class AreaRegistry:
@@ -83,6 +90,17 @@ class AreaRegistry:
     def async_list_areas(self):
         return list(self._areas)
 
+    def async_get_area_by_name(self, name):
+        return next(
+            (a for a in self._areas if _normalized(a.name) == _normalized(name)), None
+        )
+
+    def async_get_areas_by_alias(self, alias):
+        return [
+            a for a in self._areas
+            if _normalized(alias) in {_normalized(x) for x in a.aliases}
+        ]
+
 
 class FloorRegistry:
     def __init__(self, *floors):
@@ -91,6 +109,17 @@ class FloorRegistry:
     def async_list_floors(self):
         return list(self._floors)
 
+    def async_get_floor_by_name(self, name):
+        return next(
+            (f for f in self._floors if _normalized(f.name) == _normalized(name)), None
+        )
+
+    def async_get_floors_by_alias(self, alias):
+        return [
+            f for f in self._floors
+            if _normalized(alias) in {_normalized(x) for x in f.aliases}
+        ]
+
 
 class LabelRegistry:
     def __init__(self, *labels):
@@ -98,6 +127,12 @@ class LabelRegistry:
 
     def async_list_labels(self):
         return list(self._labels)
+
+    def async_get_label_by_name(self, name):
+        return next(
+            (lb for lb in self._labels if _normalized(lb.name) == _normalized(name)),
+            None,
+        )
 
 
 class TypoDistanceTests(unittest.TestCase):
@@ -246,13 +281,14 @@ class NameFallbackTests(unittest.IsolatedAsyncioTestCase):
             )
             for s in self.states
         }
-        area_registry = SimpleNamespace(
-            async_get_area=areas.get,
-            async_list_areas=lambda: list(areas.values()),
-        )
+        area_registry = AreaRegistry(*areas.values())
+        area_registry.async_get_area = areas.get
         self.saved = {
             name: getattr(discovery_module, name)
-            for name in ("ar", "er", "dr", "fr", "lr", "async_should_expose")
+            for name in (
+                "ar", "er", "dr", "fr", "lr", "async_should_expose",
+                "entity_area_id", "entity_aliases",
+            )
         }
         discovery_module.ar = SimpleNamespace(async_get=lambda hass: area_registry)
         discovery_module.er = SimpleNamespace(
@@ -261,9 +297,12 @@ class NameFallbackTests(unittest.IsolatedAsyncioTestCase):
         discovery_module.dr = SimpleNamespace(
             async_get=lambda hass: SimpleNamespace(async_get=lambda _id: None)
         )
-        discovery_module.fr = None
-        discovery_module.lr = None
+        # No floors or labels in this home.
+        discovery_module.fr = SimpleNamespace(async_get=lambda hass: None)
+        discovery_module.lr = SimpleNamespace(async_get=lambda hass: None)
         discovery_module.async_should_expose = lambda hass, assistant, entity_id: True
+        discovery_module.entity_area_id = lambda hass, entry: entry.area_id
+        discovery_module.entity_aliases = lambda hass, entry: sorted(entry.aliases)
         hass = MagicMock()
         hass.states.async_all = lambda: list(self.states)
         hass.states.get = lambda entity_id: None

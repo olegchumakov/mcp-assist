@@ -21,6 +21,8 @@ from homeassistant.helpers.selector import (
     DeviceSelectorConfig,
     EntitySelector,
     EntitySelectorConfig,
+    LabelSelector,
+    LabelSelectorConfig,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -31,12 +33,6 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
     TextSelectorType,
 )
-
-try:
-    from homeassistant.helpers.selector import LabelSelector, LabelSelectorConfig
-except ImportError:  # pragma: no cover - cores without the label selector
-    LabelSelector = None  # type: ignore[misc, assignment]
-    LabelSelectorConfig = None  # type: ignore[misc, assignment]
 
 from .access_control import (
     LEVEL_ALL,
@@ -97,8 +93,7 @@ def ui_text(language: str | None, key: str) -> str:
 
 
 def flow_language(hass) -> str:
-    config = getattr(hass, "config", None)
-    return str(getattr(config, "language", None) or "en")
+    return hass.config.language or "en"
 
 
 def parse_user_lines(text: str | None) -> dict[str, str]:
@@ -172,8 +167,6 @@ def _class_selector(classes: list[dict[str, Any]], selected: list[str]) -> Selec
 
 
 def _label_selector():
-    if LabelSelector is None:
-        return TextSelector(TextSelectorConfig())
     return LabelSelector(LabelSelectorConfig(multiple=True))
 
 
@@ -181,7 +174,7 @@ def _as_id_list(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
-        return split_names(value) if LabelSelector is None else [item.strip() for item in value.split(",") if item.strip()]
+        return [item.strip() for item in value.split(",") if item.strip()]
     if isinstance(value, (list, tuple)):
         return [str(item) for item in value if str(item).strip()]
     return []

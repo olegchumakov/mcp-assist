@@ -30,20 +30,12 @@ from homeassistant.helpers import (
     device_registry as dr,
 )
 from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
+from homeassistant.helpers import floor_registry as fr, label_registry as lr
+from homeassistant.helpers.service import async_get_all_descriptions
 from homeassistant.components.homeassistant import async_should_expose
 
-try:
-    from homeassistant.helpers import floor_registry as fr
-except ImportError:  # pragma: no cover - older Home Assistant versions
-    fr = None
-
-try:
-    from homeassistant.helpers import label_registry as lr
-except ImportError:  # pragma: no cover - older Home Assistant versions
-    lr = None
-
 from .action_verify import index_display_name, listing_disposition
-from .ha_compat import devices_by_label
+from .ha_compat import devices_by_label, entity_aliases, entity_area_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,11 +78,9 @@ class IndexManager:
             EVENT_ENTITY_REGISTRY_UPDATED,
             ar.EVENT_AREA_REGISTRY_UPDATED,
             dr.EVENT_DEVICE_REGISTRY_UPDATED,
+            fr.EVENT_FLOOR_REGISTRY_UPDATED,
+            lr.EVENT_LABEL_REGISTRY_UPDATED,
         ]
-        if fr is not None:
-            registry_events.append(fr.EVENT_FLOOR_REGISTRY_UPDATED)
-        if lr is not None:
-            registry_events.append(lr.EVENT_LABEL_REGISTRY_UPDATED)
 
         for event_type in registry_events:
             self._unsub_listeners.append(
@@ -297,21 +287,18 @@ class IndexManager:
         if not async_should_expose(self.hass, "conversation", entity.entity_id):
             return None
         state_obj = self.hass.states.get(entity.entity_id)
-        attributes = getattr(state_obj, "attributes", None) or {}
+        attributes = state_obj.attributes if state_obj is not None else {}
         area_name = ""
-        area_id = getattr(entity, "area_id", None)
-        if not area_id and getattr(entity, "device_id", None):
-            device = dr.async_get(self.hass).async_get(entity.device_id)
-            area_id = getattr(device, "area_id", None) if device else None
+        area_id = entity_area_id(self.hass, entity)
         if area_id:
             area = ar.async_get(self.hass).async_get_area(area_id)
             area_name = area.name if area else ""
         record = {
             "entity_id": entity.entity_id,
-            "state": getattr(state_obj, "state", None) or "unknown",
-            "name": getattr(state_obj, "name", None) or entity.entity_id,
+            "state": (state_obj.state if state_obj is not None else None) or "unknown",
+            "name": (state_obj.name if state_obj is not None else None) or entity.entity_id,
             "friendly_name": attributes.get("friendly_name"),
-            "aliases": list(getattr(entity, "aliases", None) or []),
+            "aliases": entity_aliases(self.hass, entity),
             "area": area_name,
         }
         if listing_disposition(record) == "skip":
@@ -324,38 +311,33 @@ class IndexManager:
         """Get all areas with entity counts."""
         area_reg = ar.async_get(self.hass)
         entity_reg = er.async_get(self.hass)
-        device_reg = dr.async_get(self.hass)
-        floor_reg = fr.async_get(self.hass) if fr else None
-        label_reg = lr.async_get(self.hass) if lr else None
+        floor_reg = fr.async_get(self.hass)
+        label_reg = lr.async_get(self.hass)
 
-        # Count entities per area
+        # Count entities per area (own area, else the device's area)
         area_counts = defaultdict(int)
         for entity in entity_reg.entities.values():
-            if self._index_record(entity) is not None:
-                if entity.area_id:
-                    area_counts[entity.area_id] += 1
-                # Also check device area
-                elif entity.device_id:
-                    device = device_reg.async_get(entity.device_id)
-                    if device and device.area_id:
-                        area_counts[device.area_id] += 1
+            if self._index_record(entity) is not None and (
+                area_id := entity_area_id(self.hass, entity)
+            ):
+                area_counts[area_id] += 1
 
         # Build area list with counts
         areas = []
         for area in area_reg.async_list_areas():
             count = area_counts.get(area.id, 0)
             if count > 0:  # Only include areas with entities
-                floor_id = getattr(area, "floor_id", None)
+                floor_id = area.floor_id
                 floor_name = None
-                if floor_id and floor_reg is not None:
+                if floor_id:
                     floor_entry = floor_reg.async_get_floor(floor_id)
                     if floor_entry:
                         floor_name = floor_entry.name
 
-                label_ids = set(getattr(area, "labels", set()) or set())
+                label_ids = set(area.labels)
                 areas.append({
                     "name": area.name,
-                    "aliases": sorted(getattr(area, "aliases", set()) or set(), key=str.casefold),
+                    "aliases": sorted(area.aliases, key=str.casefold),
                     "entity_count": count,
                     "floor": floor_name,
                     "floor_id": floor_id,
@@ -371,17 +353,13 @@ class IndexManager:
 
     async def _get_floors(self) -> List[Dict[str, Any]]:
         """Get all floors with area/entity coverage."""
-        if fr is None:
-            return []
-
         floor_reg = fr.async_get(self.hass)
         area_reg = ar.async_get(self.hass)
         entity_reg = er.async_get(self.hass)
-        device_reg = dr.async_get(self.hass)
 
         floor_area_names = defaultdict(list)
         for area_entry in area_reg.async_list_areas():
-            if getattr(area_entry, "floor_id", None):
+            if area_entry.floor_id:
                 floor_area_names[area_entry.floor_id].append(area_entry.name)
 
         floor_entities = defaultdict(set)
@@ -389,17 +367,12 @@ class IndexManager:
             if self._index_record(entity) is None:
                 continue
 
-            area_id = entity.area_id
-            if not area_id and entity.device_id:
-                device_entry = device_reg.async_get(entity.device_id)
-                if device_entry:
-                    area_id = device_entry.area_id
-
+            area_id = entity_area_id(self.hass, entity)
             if not area_id:
                 continue
 
             area_entry = area_reg.async_get_area(area_id)
-            floor_id = getattr(area_entry, "floor_id", None) if area_entry else None
+            floor_id = area_entry.floor_id if area_entry else None
             if floor_id:
                 floor_entities[floor_id].add(entity.entity_id)
 
@@ -408,7 +381,7 @@ class IndexManager:
             areas = sorted(floor_area_names.get(floor_entry.floor_id, []), key=str.casefold)
             floors.append({
                 "name": floor_entry.name,
-                "aliases": sorted(getattr(floor_entry, "aliases", set()) or set(), key=str.casefold),
+                "aliases": sorted(floor_entry.aliases, key=str.casefold),
                 "area_count": len(areas),
                 "entity_count": len(floor_entities.get(floor_entry.floor_id, set())),
                 "areas": areas,
@@ -419,9 +392,6 @@ class IndexManager:
 
     async def _get_labels(self) -> List[Dict[str, Any]]:
         """Get all labels with area/device/entity coverage."""
-        if lr is None:
-            return []
-
         label_reg = lr.async_get(self.hass)
         area_reg = ar.async_get(self.hass)
         entity_reg = er.async_get(self.hass)
@@ -429,10 +399,9 @@ class IndexManager:
 
         label_areas = defaultdict(set)
         for area_entry in area_reg.async_list_areas():
-            for label_id in getattr(area_entry, "labels", set()) or set():
+            for label_id in area_entry.labels:
                 label_areas[label_id].add(area_entry.id)
 
-        # async_entries_for_label avoids deprecated device_registry.devices mapping access.
         label_devices = devices_by_label(device_reg, label_reg)
 
         label_entities = defaultdict(set)
@@ -445,16 +414,14 @@ class IndexManager:
                 if entity_entry.device_id
                 else None
             )
-            area_id = entity_entry.area_id
-            if not area_id and device_entry:
-                area_id = device_entry.area_id
+            area_id = entity_area_id(self.hass, entity_entry)
             area_entry = area_reg.async_get_area(area_id) if area_id else None
 
-            combined_labels = set(getattr(entity_entry, "labels", set()) or set())
+            combined_labels = set(entity_entry.labels)
             if device_entry:
-                combined_labels.update(getattr(device_entry, "labels", set()) or set())
+                combined_labels.update(device_entry.labels)
             if area_entry:
-                combined_labels.update(getattr(area_entry, "labels", set()) or set())
+                combined_labels.update(area_entry.labels)
 
             for label_id in combined_labels:
                 label_entities[label_id].add(entity_entry.entity_id)
@@ -598,8 +565,8 @@ class IndexManager:
         """Get script entities with field definitions."""
         entity_reg = er.async_get(self.hass)
 
-        # Access script component to get field definitions
-        script_component = self.hass.data.get("script")
+        # Field definitions come from the public action descriptions.
+        script_services = (await async_get_all_descriptions(self.hass)).get("script", {})
 
         scripts = []
         for entity in entity_reg.entities.values():
@@ -609,12 +576,9 @@ class IndexManager:
                     script_id = entity.entity_id.split('.')[1]
                     name = record["display_name"]
 
-                    # Get fields from the script entity
-                    fields = None
-                    if script_component:
-                        script_entity = script_component.get_entity(entity.entity_id)
-                        if script_entity and hasattr(script_entity, 'fields') and script_entity.fields:
-                            fields = script_entity.fields
+                    # The action is registered under the script's key, which is
+                    # also the registry unique_id (the entity_id can be renamed).
+                    fields = script_services.get(entity.unique_id, {}).get("fields")
 
                     if fields:
                         script_info = {
