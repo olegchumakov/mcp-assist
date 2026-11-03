@@ -116,6 +116,12 @@ Some devices take a few seconds to show that a command worked. A TV switched on 
 - Script fields are read from the public list of actions instead of the script internals. Scripts whose entity ID was renamed still show their fields.
 - No settings change and no restart is needed beyond the update itself.
 
+## Stop words with a speaker name (v0.24.4)
+
+Speech-to-text that recognizes who is speaking puts that person's name at the front of the sentence, in square brackets or as a signed speaker mark. A stop word after that name still ends the conversation at once, with the usual short farewell. The language model is not asked, and it does not answer the stop word.
+
+The name stays in front of every other sentence, so the assistant can still tell people apart. A period or an exclamation mark right after the stop word is ignored. When the transcript is only the name, the conversation continues as usual.
+
 ## Multilingual Support (v0.12.0+)
 
 MCP Assist supports **21 languages** with localized configuration interfaces, language-aware system prompts, and region-specific speech detection patterns. The integration automatically detects your Home Assistant system language and provides appropriate defaults for system prompts, follow-up phrases, and end conversation words. Supported languages include: Arabic, Chinese (Simplified), Czech, Danish, Dutch, Finnish, Filipino, French, German, Greek, Hindi, Italian, Japanese, Korean, Norwegian, Polish, Portuguese, Russian, Spanish, Swedish, and Turkish.
@@ -189,7 +195,7 @@ Version 0.22.0 records conversation tool results with the Home Assistant 2026.10
 - Max Response Tokens: Maximum length of responses
 - Response Mode: None / Smart / Always (conversation continuation behavior)
 - Follow-up Phrases: Configurable phrases for pattern detection (default: "anything else, would you, can i", etc.)
-- End Conversation Words: Words/phrases that end conversations (default: "bye, thanks, stop", etc.)
+- End Conversation Words: Words or short phrases that end the conversation (default: "bye, thanks, stop", and so on). A speaker's name in front of those words still ends the chat.
 - Control Home Assistant: Enable/disable device control
 - Max Tool Iterations: How many tool calls allowed per request
 - Web Search Provider: Choose none, DuckDuckGo, or Brave Search
@@ -277,7 +283,7 @@ Version 0.22.0 records conversation tool results with the Home Assistant 2026.10
   - **Smart** (default): Contextual follow-ups when relevant, user can end with "bye"/"thanks"
   - **Always**: Natural conversational follow-ups, user can end with "bye"/"thanks"
 - **Follow-up Phrases**: Comma-separated phrases for detecting when assistant wants to continue (configurable per profile)
-- **End Conversation Words**: Comma-separated words/phrases for user-initiated ending (configurable per profile)
+- **End Conversation Words**: Comma-separated words or short phrases you can say to end the conversation (each profile has its own list). A speaker's name in front of those words still ends the chat, and that phrase is not sent to the language model.
 - **Enable Smart Entity Index**: Context-aware entity discovery with automatic gap-filling for uncommon devices (default: enabled)
 
 ### Temperature Settings

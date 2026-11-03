@@ -31,6 +31,7 @@ from homeassistant.helpers import (
 )
 from homeassistant.util import dt as dt_util
 
+from .end_intent import detect_user_ending_intent, strip_leading_speaker_label
 from .speaker_tag import NonceCache
 from .access_control import (
     decide_turn,
@@ -1058,6 +1059,9 @@ class MCPAssistConversationEntity(ConversationEntity):
 
             # End words: finish the conversation instantly with a local
             # goodbye instead of spending an LLM round-trip on it.
+            # A leading speaker label is ignored for this check only.
+            # user_input.text itself stays as speech-to-text sent it, so a
+            # normal phrase still carries the label to the model.
             if self._detect_user_ending_intent(user_input.text):
                 if self.debug_mode:
                     _LOGGER.info(
@@ -1354,7 +1358,10 @@ class MCPAssistConversationEntity(ConversationEntity):
         self, user_input: ConversationInput, conversation_id: str
     ) -> ConversationResult:
         """Instantly close the conversation on an end word, without the LLM."""
-        goodbye = get_goodbye_response(user_input.language, user_input.text)
+        # Pick the farewell from the words after a speaker label, so a name
+        # in front of "thanks" still gets the thank-you reply.
+        spoken = strip_leading_speaker_label(user_input.text or "")
+        goodbye = get_goodbye_response(user_input.language, spoken)
         self.history.add_turn(conversation_id, user_input.text, goodbye)
         intent_response = intent.IntentResponse(language=user_input.language)
         intent_response.async_set_speech(self._clean_text_for_tts(goodbye))
@@ -1450,71 +1457,12 @@ class MCPAssistConversationEntity(ConversationEntity):
         )
 
     def _detect_user_ending_intent(self, text: str) -> bool:
-        """Detect if user wants to end conversation using stopwords+1 algorithm.
+        """Detect if the user wants to end the conversation.
 
-        Handles both single words and multi-word phrases.
-
-        Returns True if:
-        - User message contains at least one stop word/phrase, AND
-        - User message has ≤1 non-stop word (excluding agent name and matched phrases)
-
-        Examples:
-        - "stop" → True (0 non-stop words)
-        - "no thanks" → True (both are stop words)
-        - "no thank you" → True ("thank you" is a stop phrase)
-        - "bye Jarvis" → True (Jarvis removed, 0 non-stop)
-        - "ok please" → True (1 non-stop word)
-        - "no turn on light" → False (3 non-stop words)
+        A leading speaker label is ignored. The text stored on the turn, and
+        any text sent to the model, is not rewritten here.
         """
-        if not text:
-            return False
-
-        # Parse end words from config
-        end_words_raw = [
-            word.strip().lower() for word in self.end_words.split(",") if word.strip()
-        ]
-        if not end_words_raw:
-            return False
-
-        # Separate multi-word phrases from single words
-        multi_word_phrases = [phrase for phrase in end_words_raw if " " in phrase]
-        single_words = [word for word in end_words_raw if " " not in word]
-
-        # Normalize text
-        text_lower = text.lower().strip()
-
-        # Check if any multi-word phrases are present and remove them
-        has_stop_word = False
-        remaining_text = text_lower
-
-        for phrase in multi_word_phrases:
-            if phrase in remaining_text:
-                has_stop_word = True
-                # Replace matched phrase with spaces to preserve word boundaries
-                remaining_text = remaining_text.replace(phrase, " ")
-
-        # Split remaining text into words
-        words = remaining_text.split()
-
-        # Remove agent name
-        profile_name_lower = self.profile_name.lower()
-        words = [word for word in words if word != profile_name_lower]
-
-        # Check if any single-word stop words are present
-        for word in words:
-            if word in single_words:
-                has_stop_word = True
-
-        if not has_stop_word:
-            return False
-
-        # Count non-stop words (words not in single_words list)
-        non_stop_words = [
-            word for word in words if word not in single_words and word.strip()
-        ]
-
-        # End if ≤1 non-stop word
-        return len(non_stop_words) <= 1
+        return detect_user_ending_intent(text, self.end_words, self.profile_name)
 
     def _detect_follow_up_patterns(self, text: str) -> bool:
         """Detect if the response expects a follow-up based on patterns."""
