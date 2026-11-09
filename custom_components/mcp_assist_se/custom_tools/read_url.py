@@ -68,7 +68,7 @@ class ReadUrlTool:
         """Get MCP tool definition for Read URL."""
         return [{
             "name": "read_url",
-            "description": "Read and extract text content from a webpage URL",
+            "description": "Read the main text of a web page. Menus, headers, and footers are left out. Use this when a specific page needs to be read.",
             "inputSchema": {
                 "$schema": "http://json-schema.org/draft-07/schema#",
                 "type": "object",
@@ -163,8 +163,10 @@ class ReadUrlTool:
 
                         html = await response.text()
 
-                        # Simple text extraction without BeautifulSoup dependency
-                        text = await self._extract_text(html, content_type)
+                        # Regexes over a large page stay off the event loop
+                        text = await self.hass.async_add_executor_job(
+                            self._extract_text, html, content_type
+                        )
 
                         # Get title from HTML
                         title = parsed.netloc
@@ -221,13 +223,15 @@ class ReadUrlTool:
                 }]
             }
 
-    async def _extract_text(self, html: str, content_type: str) -> str:
+    @staticmethod
+    def _extract_text(html: str, content_type: str) -> str:
         """Extract text from HTML without BeautifulSoup."""
         if 'text/plain' in content_type:
             return html
 
         # Basic HTML tag removal (simplified without BeautifulSoup)
         import re
+        from html import unescape
 
         # Remove script and style blocks
         html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
@@ -236,16 +240,29 @@ class ReadUrlTool:
         # Remove HTML comments
         html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
 
+        # Prefer the page's main content when it is marked up, so site
+        # navigation doesn't crowd out the article
+        for tag in ('main', 'article'):
+            match = re.search(
+                rf'<{tag}\b[^>]*>(.*)</{tag}>', html, flags=re.DOTALL | re.IGNORECASE
+            )
+            if match:
+                html = match.group(1)
+                break
+
+        # Remove navigation and other page furniture
+        html = re.sub(
+            r'<(nav|header|footer|aside|form|noscript|svg)\b[^>]*>.*?</\1>',
+            '',
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+
         # Remove HTML tags
         html = re.sub(r'<[^>]+>', ' ', html)
 
         # Decode HTML entities
-        html = html.replace('&amp;', '&')
-        html = html.replace('&lt;', '<')
-        html = html.replace('&gt;', '>')
-        html = html.replace('&quot;', '"')
-        html = html.replace('&#39;', "'")
-        html = html.replace('&nbsp;', ' ')
+        html = unescape(html)
 
         # Clean up whitespace
         lines = html.split('\n')

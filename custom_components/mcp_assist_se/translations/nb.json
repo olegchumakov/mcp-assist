@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Aktiver eksterne egendefinerte verktøy",
           "enable_calculator_tools": "Aktiver kalkulatorverktøy",
           "enable_unit_conversion_tools": "Aktiver enhetskonverteringsverktøy",
+          "enable_read_url_tool": "Les en nettside",
           "enable_memory_tools": "Aktiver verktøy for varig minne",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Lar assistenten huske, hente og glemme brukergodkjente fakta og preferanser. Minner beholdes til du ber om å glemme dem.",
+          "enable_read_url_tool": "Valgfritt. Når nettsøk også er på, kan assistenten åpne en lenke og lese hovedteksten på siden. Menyer, topptekst og bunntekst tas ikke med. Slå av hvis sider ikke skal åpnes. Felles for alle assistenter.",
           "searxng_url": "Base-URL for SearXNG-forekomsten din (for eksempel http://192.168.11.102:8888). Brukes når nettsøk er satt til SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Aktiver eksterne egendefinerte verktøy",
           "enable_calculator_tools": "Aktiver kalkulatorverktøy",
           "enable_unit_conversion_tools": "Aktiver enhetskonverteringsverktøy",
+          "enable_read_url_tool": "Les en nettside",
           "enable_memory_tools": "Aktiver verktøy for varig minne",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Lar assistenten huske, hente og glemme brukergodkjente fakta og preferanser. Minner beholdes til du ber om å glemme dem.",
+          "enable_read_url_tool": "Valgfritt. Når nettsøk også er på, kan assistenten åpne en lenke og lese hovedteksten på siden. Menyer, topptekst og bunntekst tas ikke med. Slå av hvis sider ikke skal åpnes. Felles for alle assistenter.",
           "searxng_url": "Base-URL for SearXNG-forekomsten din (for eksempel http://192.168.11.102:8888). Brukes når nettsøk er satt til SearXNG."
         }
       },

@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Activar herramientas personalizadas externas",
           "enable_calculator_tools": "Activar herramientas de calculadora",
           "enable_unit_conversion_tools": "Activar herramientas de conversión de unidades",
+          "enable_read_url_tool": "Leer una página web",
           "enable_memory_tools": "Activar herramientas de memoria persistente",
           "searxng_url": "URL de SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Permite al asistente recordar, recuperar y olvidar hechos y preferencias aprobados por el usuario. Los recuerdos se conservan hasta que pidas olvidarlos.",
+          "enable_read_url_tool": "Opcional. Si la búsqueda web también está activada, el asistente puede abrir un enlace y leer el texto principal de la página. Los menús, encabezados y pies de página se omiten. Desactívelo si no quiere que se abran páginas. Compartido por todos los asistentes.",
           "searxng_url": "URL base de tu instancia de SearXNG (por ejemplo, http://192.168.11.102:8888). Se usa cuando la búsqueda web está configurada como SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Activar herramientas personalizadas externas",
           "enable_calculator_tools": "Activar herramientas de calculadora",
           "enable_unit_conversion_tools": "Activar herramientas de conversión de unidades",
+          "enable_read_url_tool": "Leer una página web",
           "enable_memory_tools": "Activar herramientas de memoria persistente",
           "searxng_url": "URL de SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Permite al asistente recordar, recuperar y olvidar hechos y preferencias aprobados por el usuario. Los recuerdos se conservan hasta que pidas olvidarlos.",
+          "enable_read_url_tool": "Opcional. Si la búsqueda web también está activada, el asistente puede abrir un enlace y leer el texto principal de la página. Los menús, encabezados y pies de página se omiten. Desactívelo si no quiere que se abran páginas. Compartido por todos los asistentes.",
           "searxng_url": "URL base de tu instancia de SearXNG (por ejemplo, http://192.168.11.102:8888). Se usa cuando la búsqueda web está configurada como SearXNG."
         }
       },

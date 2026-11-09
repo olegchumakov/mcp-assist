@@ -24,6 +24,13 @@ from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.recorder import get_instance, history
 from homeassistant.util import dt as dt_util
 
+from .action_args import (
+    explicit_entity_ids,
+    exposure_refusal_text,
+    merge_ids,
+    normalize_action_arguments,
+    unexposed_entity_ids,
+)
 from .access_control import (
     authorize_action,
     external_tool_allowed,
@@ -53,6 +60,7 @@ from .action_verify import (
     wait_satisfied,
 )
 from .action_wait import wait_for_targets
+from .discovery_filters import domain_means_any, empty_discovery_message
 from .const import (
     CONF_ACTION_CONFIRM_SECONDS,
     DEFAULT_ACTION_CONFIRM_SECONDS,
@@ -1934,11 +1942,18 @@ class MCPServer:
                         },
                         "action": {
                             "type": "string",
-                            "description": "The service action (e.g., 'turn_on', 'turn_off', 'toggle', 'set_temperature')",
+                            "description": "The service action (e.g., 'turn_on', 'turn_off', 'toggle', 'set_temperature', 'set_cover_position')",
+                        },
+                        "entity_id": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {"type": "array", "items": {"type": "string"}},
+                            ],
+                            "description": "Entity ID or list of entity IDs to control. Optional when target is set. Only entities exposed to Assist can be controlled.",
                         },
                         "target": {
                             "type": "object",
-                            "description": "Target entities, areas, or devices",
+                            "description": "Optional alternative to entity_id: target entities, areas, or devices",
                             "properties": {
                                 "entity_id": {
                                     "oneOf": [
@@ -1971,7 +1986,7 @@ class MCPServer:
                             "additionalProperties": True,
                         },
                     },
-                    "required": ["domain", "action", "target"],
+                    "required": ["domain", "action"],
                     "additionalProperties": False,
                 },
             },
@@ -2369,6 +2384,10 @@ class MCPServer:
 
     async def tool_discover_entities(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Discover entities based on criteria with progress notifications."""
+        # Models often ask for every domain with a catch-all value
+        if domain_means_any(args.get("domain")):
+            args = {**args, "domain": None}
+
         # Notify start
         self.publish_progress(
             "tool_start",
@@ -2420,6 +2439,27 @@ class MCPServer:
             content[0]["text"] = f"{note}\n{content[0]['text']}"
         return result
 
+    def _empty_discovery_hint(self, args: Dict[str, Any]) -> str:
+        """Explain an empty discovery result so the model can retry."""
+        area = args.get("area")
+        area_is_known = None
+        known_names = None
+        if isinstance(area, str) and area.strip():
+            area_registry = ar.async_get(self.hass)
+            area_is_known = (
+                self.discovery._resolve_area_entry(area, area_registry) is not None
+            )
+            # Room names are a map of the home. Skip the list when a person
+            # is limited to some of it.
+            if area_is_known is False and not self._access_restricted():
+                known_names = sorted(
+                    (entry.name for entry in area_registry.async_list_areas()),
+                    key=str.casefold,
+                )
+        return empty_discovery_message(
+            args, area_is_known=area_is_known, known_area_names=known_names
+        )
+
     def _display_name(self, entity: Dict[str, Any]) -> str:
         """Entity name plus its aliases, so the model can tell entities apart."""
         state_obj = self.hass.states.get(entity.get("entity_id", ""))
@@ -2442,7 +2482,7 @@ class MCPServer:
                 "content": [
                     {
                         "type": "text",
-                        "text": "No entities found matching the search criteria.",
+                        "text": self._empty_discovery_hint(args),
                     }
                 ]
             }
@@ -2709,10 +2749,10 @@ class MCPServer:
         """Perform an action and report whether entity state actually changed."""
         domain = args.get("domain")
         action = args.get("action")
-        target = args.get("target", {})
-        data = args.get("data", {})
-        if not isinstance(data, dict):
-            data = {}
+        # A plain entity_id, and any target the model hid in data, is folded
+        # in before access control so both paths see the same devices.
+        target, data = normalize_action_arguments(args)
+        requested_entity_ids = explicit_entity_ids(target)
 
         # Validate required parameters
         if not domain:
@@ -2768,11 +2808,39 @@ class MCPServer:
         # Resolve target (convert areas to entity_ids if needed)
         try:
             resolved_target = await self.resolve_target(target)
-            _LOGGER.debug(f"Resolved target: {resolved_target}")
         except Exception as err:
             error_msg = f"Failed to resolve target: {err}"
             _LOGGER.error(error_msg)
             return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
+
+        # Voice-access limits already ran. This is the separate Assist expose
+        # gate: a hidden entity cannot be controlled by id, by device, or by
+        # a copy of the id inside data. Action verification still runs after.
+        if not isinstance(resolved_target, dict):
+            resolved_target = {}
+        device_entities = resolved_target.pop("_device_entity_ids", [])
+        _LOGGER.debug("Resolved target: %s", resolved_target)
+        check_ids = merge_ids(resolved_target.get("entity_id"), device_entities)
+        refused = unexposed_entity_ids(
+            check_ids,
+            lambda entity_id: async_should_expose(
+                self.hass, "conversation", entity_id
+            ),
+        )
+        if refused:
+            _LOGGER.warning(
+                "Refused action on entities not exposed to Assist: %s",
+                _sanitize_log_value(refused, 200),
+            )
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": exposure_refusal_text(refused, requested_entity_ids),
+                    }
+                ],
+                "isError": True,
+            }
 
         # Deprecated color_temp (mireds) was removed from light.turn_on in HA
         # 2026.3. Auto-convert instead of rejecting so the LLM doesn't need a
@@ -3491,9 +3559,35 @@ class MCPServer:
                 else:
                     resolved["entity_id"] = area_entities
 
-        # Pass through device_id if present (HA will handle it)
+        # Expand device_id so each entity can be exposure-checked. The device
+        # id itself is kept: that is what Home Assistant receives, so a device
+        # with many entities is not cut off by the per-call confirmation limit.
+        # _device_entity_ids is removed before the service call.
         if "device_id" in target:
-            resolved["device_id"] = target["device_id"]
-            _LOGGER.debug(f"Using device_id: {target['device_id']}")
+            device_ids = target["device_id"]
+            if isinstance(device_ids, str):
+                device_ids = [device_ids]
+            elif not isinstance(device_ids, list):
+                device_ids = []
+            try:
+                entity_registry = er.async_get(self.hass)
+                device_entities = [
+                    entry.entity_id
+                    for device_id in device_ids
+                    if device_id
+                    for entry in er.async_entries_for_device(
+                        entity_registry, str(device_id)
+                    )
+                ]
+            except Exception as err:
+                _LOGGER.error("Could not resolve device_id: %s", err)
+                raise ValueError("Could not resolve device_id to entities") from err
+            _LOGGER.debug(
+                "Found %d entities for devices %s", len(device_entities), device_ids
+            )
+            if not device_entities and "entity_id" not in resolved:
+                raise ValueError("No entities found for that device")
+            resolved["device_id"] = device_ids
+            resolved["_device_entity_ids"] = device_entities
 
         return resolved if resolved else target

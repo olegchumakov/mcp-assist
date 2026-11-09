@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Harici özel araçları etkinleştir",
           "enable_calculator_tools": "Hesap makinesi araçlarını etkinleştir",
           "enable_unit_conversion_tools": "Birim dönüştürme araçlarını etkinleştir",
+          "enable_read_url_tool": "Web sayfasını oku",
           "enable_memory_tools": "Kalıcı bellek araçlarını etkinleştir",
           "searxng_url": "SearXNG URL'si"
         },
         "data_description": {
           "enable_memory_tools": "Asistanın kullanıcı onaylı gerçekleri ve tercihleri hatırlamasını, geri çağırmasını ve unutmasını sağlar. Anılar, unutulmasını isteyene kadar saklanır.",
+          "enable_read_url_tool": "İsteğe bağlı. Web araması da açıksa asistan bir bağlantıyı açıp sayfanın ana metnini okuyabilir. Menüler, üstbilgi ve altbilgi alınmaz. Sayfalar açılmasın istiyorsanız kapatın. Tüm asistanlar için ortaktır.",
           "searxng_url": "SearXNG örneğinizin temel URL'si (örneğin http://192.168.11.102:8888). Web Araması SearXNG olarak ayarlandığında kullanılır."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Harici özel araçları etkinleştir",
           "enable_calculator_tools": "Hesap makinesi araçlarını etkinleştir",
           "enable_unit_conversion_tools": "Birim dönüştürme araçlarını etkinleştir",
+          "enable_read_url_tool": "Web sayfasını oku",
           "enable_memory_tools": "Kalıcı bellek araçlarını etkinleştir",
           "searxng_url": "SearXNG URL'si"
         },
         "data_description": {
           "enable_memory_tools": "Asistanın kullanıcı onaylı gerçekleri ve tercihleri hatırlamasını, geri çağırmasını ve unutmasını sağlar. Anılar, unutulmasını isteyene kadar saklanır.",
+          "enable_read_url_tool": "İsteğe bağlı. Web araması da açıksa asistan bir bağlantıyı açıp sayfanın ana metnini okuyabilir. Menüler, üstbilgi ve altbilgi alınmaz. Sayfalar açılmasın istiyorsanız kapatın. Tüm asistanlar için ortaktır.",
           "searxng_url": "SearXNG örneğinizin temel URL'si (örneğin http://192.168.11.102:8888). Web Araması SearXNG olarak ayarlandığında kullanılır."
         }
       },

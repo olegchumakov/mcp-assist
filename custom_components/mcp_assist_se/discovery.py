@@ -19,6 +19,7 @@ from homeassistant.components.homeassistant import async_should_expose
 
 from .action_verify import listing_disposition, prepare_listed_entity
 from .const import MAX_ENTITIES_PER_DISCOVERY
+from .discovery_filters import area_listing_applies, name_is_aggregate_query
 from .ha_compat import entity_aliases, entity_area_id
 from contextvars import ContextVar
 
@@ -139,7 +140,15 @@ class SmartDiscovery:
             return await self._discover_pet_entities(name_contains, limit)
         elif query_type == QueryType.AGGREGATE and not device_class and not name_pattern and not inferred_type and not floor and not label:
             return await self._discover_aggregate_entities(domain, state, limit)
-        elif area and not floor and not label and not device_class and not name_pattern and not inferred_type:
+        elif area_listing_applies(
+            area=area,
+            name_contains=name_contains,
+            floor=floor,
+            label=label,
+            device_class=device_class,
+            name_pattern=name_pattern,
+            inferred_type=inferred_type,
+        ):
             return await self._discover_area_entities(area, domain, state, limit)
         else:
             # Fall back to general discovery (handles device_class, name_pattern, and inferred_type)
@@ -177,8 +186,8 @@ class SmartDiscovery:
                     return QueryType.PET
                 return QueryType.PERSON
 
-            # Check for aggregate queries
-            if any(word in name_lower for word in ["who", "anyone", "everyone", "all"]):
+            # Whole words only: "all" must not match "hallway"
+            if name_is_aggregate_query(name_lower):
                 return QueryType.AGGREGATE
 
         # Area-based query

@@ -1,1 +1,1 @@
-Use `read_url` after `search` when a specific page needs to be inspected or summarized from its URL.
+Use `read_url` after `search` when a specific page needs to be read or summarized from its address. The tool returns the main text and leaves out menus, headers, and footers.

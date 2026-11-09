@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Externe benutzerdefinierte Tools aktivieren",
           "enable_calculator_tools": "Taschenrechner-Tools aktivieren",
           "enable_unit_conversion_tools": "Einheitenumrechnungs-Tools aktivieren",
+          "enable_read_url_tool": "Webseite lesen",
           "enable_memory_tools": "Tools für persistentes Gedächtnis aktivieren",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Ermöglicht dem Assistenten, vom Nutzer bestätigte Fakten und Vorlieben zu speichern, abzurufen und zu vergessen. Erinnerungen bleiben erhalten, bis Sie sie vergessen lassen.",
+          "enable_read_url_tool": "Optional. Wenn die Websuche ebenfalls an ist, kann der Assistent einen Link öffnen und den Haupttext der Seite lesen. Menüs, Kopf- und Fußzeilen bleiben weg. Ausschalten, wenn keine Seiten geöffnet werden sollen. Gilt für alle Assistenten.",
           "searxng_url": "Basis-URL Ihrer SearXNG-Instanz (zum Beispiel http://192.168.11.102:8888). Wird verwendet, wenn als Websuche SearXNG ausgewählt ist."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Externe benutzerdefinierte Tools aktivieren",
           "enable_calculator_tools": "Taschenrechner-Tools aktivieren",
           "enable_unit_conversion_tools": "Einheitenumrechnungs-Tools aktivieren",
+          "enable_read_url_tool": "Webseite lesen",
           "enable_memory_tools": "Tools für persistentes Gedächtnis aktivieren",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Ermöglicht dem Assistenten, vom Nutzer bestätigte Fakten und Vorlieben zu speichern, abzurufen und zu vergessen. Erinnerungen bleiben erhalten, bis Sie sie vergessen lassen.",
+          "enable_read_url_tool": "Optional. Wenn die Websuche ebenfalls an ist, kann der Assistent einen Link öffnen und den Haupttext der Seite lesen. Menüs, Kopf- und Fußzeilen bleiben weg. Ausschalten, wenn keine Seiten geöffnet werden sollen. Gilt für alle Assistenten.",
           "searxng_url": "Basis-URL Ihrer SearXNG-Instanz (zum Beispiel http://192.168.11.102:8888). Wird verwendet, wenn als Websuche SearXNG ausgewählt ist."
         }
       },

@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Aktivér eksterne brugerdefinerede værktøjer",
           "enable_calculator_tools": "Aktivér lommeregner-værktøjer",
           "enable_unit_conversion_tools": "Aktivér enhedskonverteringsværktøjer",
+          "enable_read_url_tool": "Læs en webside",
           "enable_memory_tools": "Aktivér værktøjer til permanent hukommelse",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Lader assistenten huske, hente og glemme brugergodkendte fakta og præferencer. Erindringer bevares, indtil du beder om at glemme dem.",
+          "enable_read_url_tool": "Valgfrit. Når websøgning også er slået til, kan assistenten åbne et link og læse sidens hovedtekst. Menuer, sidehoved og sidefod udelades. Slå fra, hvis sider ikke skal åbnes. Fælles for alle assistenter.",
           "searxng_url": "Basis-URL til din SearXNG-instans (for eksempel http://192.168.11.102:8888). Bruges, når websøgning er indstillet til SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Aktivér eksterne brugerdefinerede værktøjer",
           "enable_calculator_tools": "Aktivér lommeregner-værktøjer",
           "enable_unit_conversion_tools": "Aktivér enhedskonverteringsværktøjer",
+          "enable_read_url_tool": "Læs en webside",
           "enable_memory_tools": "Aktivér værktøjer til permanent hukommelse",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Lader assistenten huske, hente og glemme brugergodkendte fakta og præferencer. Erindringer bevares, indtil du beder om at glemme dem.",
+          "enable_read_url_tool": "Valgfrit. Når websøgning også er slået til, kan assistenten åbne et link og læse sidens hovedtekst. Menuer, sidehoved og sidefod udelades. Slå fra, hvis sider ikke skal åbnes. Fælles for alle assistenter.",
           "searxng_url": "Basis-URL til din SearXNG-instans (for eksempel http://192.168.11.102:8888). Bruges, når websøgning er indstillet til SearXNG."
         }
       },

@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Povolit externí vlastní nástroje",
           "enable_calculator_tools": "Povolit nástroje kalkulačky",
           "enable_unit_conversion_tools": "Povolit nástroje pro převod jednotek",
+          "enable_read_url_tool": "Číst webovou stránku",
           "enable_memory_tools": "Povolit nástroje trvalé paměti",
           "searxng_url": "URL SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Umožňuje asistentovi zapamatovat si, vyhledávat a zapomínat uživatelem schválené skutečnosti a preference. Paměti zůstávají uloženy, dokud nepožádáte o jejich zapomenutí.",
+          "enable_read_url_tool": "Volitelné. Když je zapnuté i hledání na webu, asistent může otevřít odkaz a přečíst hlavní text stránky. Nabídky, záhlaví a zápatí se vynechají. Vypněte, pokud se stránky nemají otevírat. Společné pro všechny asistenty.",
           "searxng_url": "Základní URL vaší instance SearXNG (například http://192.168.11.102:8888). Použije se, když je webové vyhledávání nastaveno na SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Povolit externí vlastní nástroje",
           "enable_calculator_tools": "Povolit nástroje kalkulačky",
           "enable_unit_conversion_tools": "Povolit nástroje pro převod jednotek",
+          "enable_read_url_tool": "Číst webovou stránku",
           "enable_memory_tools": "Povolit nástroje trvalé paměti",
           "searxng_url": "URL SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Umožňuje asistentovi zapamatovat si, vyhledávat a zapomínat uživatelem schválené skutečnosti a preference. Paměti zůstávají uloženy, dokud nepožádáte o jejich zapomenutí.",
+          "enable_read_url_tool": "Volitelné. Když je zapnuté i hledání na webu, asistent může otevřít odkaz a přečíst hlavní text stránky. Nabídky, záhlaví a zápatí se vynechají. Vypněte, pokud se stránky nemají otevírat. Společné pro všechny asistenty.",
           "searxng_url": "Základní URL vaší instance SearXNG (například http://192.168.11.102:8888). Použije se, když je webové vyhledávání nastaveno na SearXNG."
         }
       },

@@ -74,6 +74,7 @@
           "enable_external_custom_tools": "Enable External Custom Tools",
           "enable_calculator_tools": "Enable Calculator Tools",
           "enable_unit_conversion_tools": "Enable Unit Conversion Tools",
+          "enable_read_url_tool": "Read a web page",
           "enable_memory_tools": "Enable Persistent Memory Tools",
           "max_entities_per_discovery": "Max Entities Per Discovery (20-500)",
           "searxng_url": "SearXNG URL"
@@ -81,6 +82,7 @@
         "data_description": {
           "action_confirm_seconds": "After a command, the assistant waits for the device to report that it worked. Fast devices, like most lights, answer right away. Slow ones, like a TV that takes a few seconds to turn on, get up to this many seconds. If time runs out, the assistant says the command was sent instead of saying it failed. 2 to 30, default 10.",
           "enable_memory_tools": "Lets the assistant remember, recall and forget user-approved facts and preferences. Memories persist until you ask to forget them.",
+          "enable_read_url_tool": "Optional. When web search is also on, the assistant can open a link and read the main text of that page. Menus, headers, and footers are left out. Turn this off if you do not want pages opened. Shared by every assistant.",
           "searxng_url": "Base URL of your SearXNG instance (for example, http://192.168.11.102:8888). Used when Web Search is set to SearXNG."
         }
       },
@@ -190,6 +192,7 @@
           "enable_external_custom_tools": "Enable External Custom Tools",
           "enable_calculator_tools": "Enable Calculator Tools",
           "enable_unit_conversion_tools": "Enable Unit Conversion Tools",
+          "enable_read_url_tool": "Read a web page",
           "enable_memory_tools": "Enable Persistent Memory Tools",
           "max_entities_per_discovery": "Max Entities Per Discovery (20-500)",
           "searxng_url": "SearXNG URL"
@@ -197,6 +200,7 @@
         "data_description": {
           "action_confirm_seconds": "After a command, the assistant waits for the device to report that it worked. Fast devices, like most lights, answer right away. Slow ones, like a TV that takes a few seconds to turn on, get up to this many seconds. If time runs out, the assistant says the command was sent instead of saying it failed. 2 to 30, default 10.",
           "enable_memory_tools": "Lets the assistant remember, recall and forget user-approved facts and preferences. Memories persist until you ask to forget them.",
+          "enable_read_url_tool": "Optional. When web search is also on, the assistant can open a link and read the main text of that page. Menus, headers, and footers are left out. Turn this off if you do not want pages opened. Shared by every assistant.",
           "searxng_url": "Base URL of your SearXNG instance (for example, http://192.168.11.102:8888). Used when Web Search is set to SearXNG."
         }
       },

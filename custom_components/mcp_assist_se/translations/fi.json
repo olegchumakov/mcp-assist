@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Ota ulkoiset mukautetut työkalut käyttöön",
           "enable_calculator_tools": "Ota laskintyökalut käyttöön",
           "enable_unit_conversion_tools": "Ota yksikkömuunnostyökalut käyttöön",
+          "enable_read_url_tool": "Lue verkkosivu",
           "enable_memory_tools": "Ota pysyvän muistin työkalut käyttöön",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Antaa avustajan muistaa, hakea ja unohtaa käyttäjän hyväksymät tiedot ja mieltymykset. Muistot säilyvät, kunnes pyydät unohtamaan ne.",
+          "enable_read_url_tool": "Valinnainen. Kun verkkohaku on myös päällä, avustaja voi avata linkin ja lukea sivun päätekstin. Valikot, ylä- ja alatunnisteet jätetään pois. Poista käytöstä, jos sivuja ei saa avata. Yhteinen kaikille avustajille.",
           "searxng_url": "SearXNG-instanssisi perus-URL (esimerkiksi http://192.168.11.102:8888). Käytetään, kun verkkohauksi on valittu SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Ota ulkoiset mukautetut työkalut käyttöön",
           "enable_calculator_tools": "Ota laskintyökalut käyttöön",
           "enable_unit_conversion_tools": "Ota yksikkömuunnostyökalut käyttöön",
+          "enable_read_url_tool": "Lue verkkosivu",
           "enable_memory_tools": "Ota pysyvän muistin työkalut käyttöön",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Antaa avustajan muistaa, hakea ja unohtaa käyttäjän hyväksymät tiedot ja mieltymykset. Muistot säilyvät, kunnes pyydät unohtamaan ne.",
+          "enable_read_url_tool": "Valinnainen. Kun verkkohaku on myös päällä, avustaja voi avata linkin ja lukea sivun päätekstin. Valikot, ylä- ja alatunnisteet jätetään pois. Poista käytöstä, jos sivuja ei saa avata. Yhteinen kaikille avustajille.",
           "searxng_url": "SearXNG-instanssisi perus-URL (esimerkiksi http://192.168.11.102:8888). Käytetään, kun verkkohauksi on valittu SearXNG."
         }
       },

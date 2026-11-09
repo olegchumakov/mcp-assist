@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Włącz zewnętrzne narzędzia niestandardowe",
           "enable_calculator_tools": "Włącz narzędzia kalkulatora",
           "enable_unit_conversion_tools": "Włącz narzędzia konwersji jednostek",
+          "enable_read_url_tool": "Czytaj stronę internetową",
           "enable_memory_tools": "Włącz narzędzia trwałej pamięci",
           "searxng_url": "URL SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Pozwala asystentowi zapamiętywać, odczytywać i zapominać zatwierdzone przez użytkownika fakty i preferencje. Wspomnienia są przechowywane, dopóki nie poprosisz, by je zapomnieć.",
+          "enable_read_url_tool": "Opcjonalne. Gdy wyszukiwanie w internecie też jest włączone, asystent może otworzyć odnośnik i przeczytać główną treść strony. Menu, nagłówki i stopki są pomijane. Wyłącz, jeśli strony nie mają być otwierane. Wspólne dla wszystkich asystentów.",
           "searxng_url": "Bazowy adres URL Twojej instancji SearXNG (na przykład http://192.168.11.102:8888). Używany, gdy wyszukiwanie w sieci ustawiono na SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Włącz zewnętrzne narzędzia niestandardowe",
           "enable_calculator_tools": "Włącz narzędzia kalkulatora",
           "enable_unit_conversion_tools": "Włącz narzędzia konwersji jednostek",
+          "enable_read_url_tool": "Czytaj stronę internetową",
           "enable_memory_tools": "Włącz narzędzia trwałej pamięci",
           "searxng_url": "URL SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Pozwala asystentowi zapamiętywać, odczytywać i zapominać zatwierdzone przez użytkownika fakty i preferencje. Wspomnienia są przechowywane, dopóki nie poprosisz, by je zapomnieć.",
+          "enable_read_url_tool": "Opcjonalne. Gdy wyszukiwanie w internecie też jest włączone, asystent może otworzyć odnośnik i przeczytać główną treść strony. Menu, nagłówki i stopki są pomijane. Wyłącz, jeśli strony nie mają być otwierane. Wspólne dla wszystkich asystentów.",
           "searxng_url": "Bazowy adres URL Twojej instancji SearXNG (na przykład http://192.168.11.102:8888). Używany, gdy wyszukiwanie w sieci ustawiono na SearXNG."
         }
       },

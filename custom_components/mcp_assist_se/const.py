@@ -37,6 +37,7 @@ CONF_ENABLE_CUSTOM_TOOLS = "enable_custom_tools"
 CONF_ENABLE_EXTERNAL_CUSTOM_TOOLS = "enable_external_custom_tools"
 CONF_ENABLE_CALCULATOR_TOOLS = "enable_calculator_tools"
 CONF_ENABLE_UNIT_CONVERSION_TOOLS = "enable_unit_conversion_tools"
+CONF_ENABLE_READ_URL_TOOL = "enable_read_url_tool"
 CONF_BRAVE_API_KEY = "brave_api_key"
 CONF_ALLOWED_IPS = "allowed_ips"
 CONF_SEARCH_PROVIDER = "search_provider"
@@ -98,6 +99,8 @@ DEFAULT_ENABLE_CUSTOM_TOOLS = False
 DEFAULT_ENABLE_EXTERNAL_CUSTOM_TOOLS = False
 DEFAULT_ENABLE_CALCULATOR_TOOLS = False
 DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS = False
+# On unless turned off, and only offered when a web search provider is set.
+DEFAULT_ENABLE_READ_URL_TOOL = True
 DEFAULT_BRAVE_API_KEY = ""
 DEFAULT_SEARXNG_URL = ""
 DEFAULT_ALLOWED_IPS = ""
@@ -178,7 +181,7 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 
 ## Available Tools
 - **discover_entities**: find devices by name/area/floor/label/domain/device_class/state (ALWAYS use first)
-- **perform_action**: control devices using discovered entity IDs
+- **perform_action**: control devices using discovered entity IDs. You may pass entity_id as its own argument (one id or a list) or inside target. Only entities exposed to the voice assistant can be controlled.
 - **get_entity_details**: check states using discovered entity IDs, including area/floor/label context
 - **get_entity_history**: get historical state changes for an entity (answers "when did X happen?")
 - **list_areas/list_domains**: list available areas with floor/label context and device types
@@ -186,7 +189,7 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 - **run_automation**: trigger automations manually
 - **set_conversation_state**: indicate if expecting user response
 - **search**: search the web for current information
-- **read_url**: read and extract content from web pages
+- **read_url**: read the main text of a web page. Menus, headers, and footers are left out.
 - **IMPORTANT**: call_service is not available - use perform_action instead
 
 ## Device Control Workflow
@@ -229,8 +232,8 @@ Areas, floors, entities, and sometimes devices may also have aliases. Treat alia
 
 For ANY device request:
 1. Check the index to understand what's available
-2. Use discover_entities with appropriate filters (device_class, area, floor, label, domain, name_contains, state)
-3. If no results, try broader search
+2. Use discover_entities with appropriate filters (device_class, area, floor, label, domain, name_contains, state). Combine area and name_contains when the user names one device in a room. A domain of "all" means every type. The word "hallway" is not a request for everything.
+3. If no results, try a broader search, using the hint in the tool result.
 
 ## Response Rules
 - Short, concise replies in plain text only
