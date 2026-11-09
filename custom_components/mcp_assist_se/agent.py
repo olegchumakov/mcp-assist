@@ -1,6 +1,5 @@
 """LM Studio MCP conversation agent."""
 
-import asyncio
 import json
 import logging
 import re
@@ -32,6 +31,8 @@ from homeassistant.helpers import (
 from homeassistant.util import dt as dt_util
 
 from .end_intent import detect_user_ending_intent, strip_leading_speaker_label
+from .model_output import prompt_clock_value, strip_thinking_tags
+from .tool_batch import execute_tool_batch
 from .speaker_tag import NonceCache
 from .access_control import (
     decide_turn,
@@ -1558,9 +1559,10 @@ class MCPAssistConversationEntity(ConversationEntity):
                 self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
             )
 
-            # Format time and date variables
-            current_time = dt_util.now().strftime("%H:%M:%S")
-            current_date = dt_util.now().strftime("%Y-%m-%d")
+            # Digits, including seconds. The model turns this clock time into words.
+            now = dt_util.now()
+            current_time = prompt_clock_value(now)
+            current_date = now.strftime("%Y-%m-%d")
             technical_prompt = technical_prompt.replace("{time}", current_time)
             technical_prompt = technical_prompt.replace("{date}", current_date)
 
@@ -1727,9 +1729,10 @@ class MCPAssistConversationEntity(ConversationEntity):
                 self.entry.data.get(CONF_TECHNICAL_PROMPT, DEFAULT_TECHNICAL_PROMPT),
             )
 
-            # Format time and date variables
-            current_time = dt_util.now().strftime("%H:%M:%S")
-            current_date = dt_util.now().strftime("%Y-%m-%d")
+            # Digits, including seconds. The model turns this clock time into words.
+            now = dt_util.now()
+            current_time = prompt_clock_value(now)
+            current_date = now.strftime("%Y-%m-%d")
 
             # Replace placeholders in technical prompt
             technical_prompt = technical_prompt.replace("{time}", current_time)
@@ -1978,43 +1981,8 @@ class MCPAssistConversationEntity(ConversationEntity):
         return value
 
     def _strip_thinking_tags(self, text: str) -> tuple[str, str]:
-        """Strip thinking/reasoning tags from model output.
-
-        Reasoning models output chain-of-thought in various tag formats:
-        - <think>...</think> (Qwen3, DeepSeek R1, GPT-OSS)
-        - <|thought|>...<|/thought|> (some fine-tuned models)
-
-        This content should not be shown to users or spoken via TTS.
-
-        Returns:
-            Tuple of (cleaned_text, thinking_content)
-            - cleaned_text: Response with thinking tags removed
-            - thinking_content: The extracted thinking content (for debug logs)
-        """
-        # Match all known thinking tag formats (case insensitive, multiline)
-        patterns = [
-            r"<think>(.*?)</think>",
-            r"<\|thought\|>(.*?)<\|/thought\|>",
-        ]
-
-        all_matches = []
-        cleaned_text = text
-
-        for pattern in patterns:
-            matches = re.findall(pattern, cleaned_text, re.DOTALL | re.IGNORECASE)
-            all_matches.extend(matches)
-            cleaned_text = re.sub(pattern, "", cleaned_text, flags=re.DOTALL | re.IGNORECASE)
-
-        if not all_matches:
-            return text, ""
-
-        thinking_content = "\n".join(all_matches)
-
-        # Clean up extra whitespace that might be left
-        cleaned_text = re.sub(r"\n\s*\n", "\n\n", cleaned_text)  # Multiple newlines
-        cleaned_text = cleaned_text.strip()
-
-        return cleaned_text, thinking_content
+        """Strip thinking/reasoning tags, including a tag the model left open."""
+        return strip_thinking_tags(text)
 
     def _clean_text_for_tts(self, text: str) -> str:
         """Clean text for TTS to handle special characters properly."""
@@ -2160,15 +2128,13 @@ class MCPAssistConversationEntity(ConversationEntity):
     async def _execute_tool_calls(
         self, tool_calls: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Execute a list of tool calls and return results in OpenAI format."""
-        if not tool_calls:
-            return []
+        """Execute tool calls, sequentially when any of them changes state.
 
-        return list(
-            await asyncio.gather(
-                *(self._execute_single_tool_call(tool_call) for tool_call in tool_calls)
-            )
-        )
+        Read-only calls in a batch still run together. A device command, a
+        script, or a memory write waits its turn so later calls see earlier
+        results.
+        """
+        return await execute_tool_batch(tool_calls, self._execute_single_tool_call)
 
     async def _execute_single_tool_call(
         self, tool_call: Dict[str, Any]

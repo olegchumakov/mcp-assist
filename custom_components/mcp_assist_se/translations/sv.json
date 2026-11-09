@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Aktivera externa anpassade verktyg",
           "enable_calculator_tools": "Aktivera miniräknarverktyg",
           "enable_unit_conversion_tools": "Aktivera enhetsomvandlingsverktyg",
+          "enable_read_url_tool": "Läsa en webbsida",
           "enable_memory_tools": "Aktivera verktyg för beständigt minne",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Låter assistenten komma ihåg, hämta och glömma användargodkända fakta och preferenser. Minnen sparas tills du ber att få dem bortglömda.",
+          "enable_read_url_tool": "Valfritt. När webbsök också är på kan assistenten öppna en länk och läsa sidans huvudtext. Menyer, sidhuvud och sidfot lämnas bort. Stäng av om sidor inte ska öppnas. Gemensamt för alla assistenter.",
           "searxng_url": "Bas-URL för din SearXNG-instans (till exempel http://192.168.11.102:8888). Används när websökning är inställd på SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Aktivera externa anpassade verktyg",
           "enable_calculator_tools": "Aktivera miniräknarverktyg",
           "enable_unit_conversion_tools": "Aktivera enhetsomvandlingsverktyg",
+          "enable_read_url_tool": "Läsa en webbsida",
           "enable_memory_tools": "Aktivera verktyg för beständigt minne",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Låter assistenten komma ihåg, hämta och glömma användargodkända fakta och preferenser. Minnen sparas tills du ber att få dem bortglömda.",
+          "enable_read_url_tool": "Valfritt. När webbsök också är på kan assistenten öppna en länk och läsa sidans huvudtext. Menyer, sidhuvud och sidfot lämnas bort. Stäng av om sidor inte ska öppnas. Gemensamt för alla assistenter.",
           "searxng_url": "Bas-URL för din SearXNG-instans (till exempel http://192.168.11.102:8888). Används när websökning är inställd på SearXNG."
         }
       },

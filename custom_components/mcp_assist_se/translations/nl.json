@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Externe aangepaste tools inschakelen",
           "enable_calculator_tools": "Rekenmachine-tools inschakelen",
           "enable_unit_conversion_tools": "Eenheidsconversietools inschakelen",
+          "enable_read_url_tool": "Webpagina lezen",
           "enable_memory_tools": "Tools voor permanent geheugen inschakelen",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Laat de assistent door de gebruiker goedgekeurde feiten en voorkeuren onthouden, ophalen en vergeten. Herinneringen blijven bewaard tot je vraagt ze te vergeten.",
+          "enable_read_url_tool": "Optioneel. Als zoeken op internet ook aan staat, kan de assistent een link openen en de hoofdtekst van de pagina lezen. Menu's, koppen en voetteksten blijven weg. Zet dit uit als pagina's niet geopend mogen worden. Geldt voor elke assistent.",
           "searxng_url": "Basis-URL van je SearXNG-instantie (bijvoorbeeld http://192.168.11.102:8888). Wordt gebruikt wanneer Webzoekopdracht op SearXNG staat."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Externe aangepaste tools inschakelen",
           "enable_calculator_tools": "Rekenmachine-tools inschakelen",
           "enable_unit_conversion_tools": "Eenheidsconversietools inschakelen",
+          "enable_read_url_tool": "Webpagina lezen",
           "enable_memory_tools": "Tools voor permanent geheugen inschakelen",
           "searxng_url": "SearXNG-URL"
         },
         "data_description": {
           "enable_memory_tools": "Laat de assistent door de gebruiker goedgekeurde feiten en voorkeuren onthouden, ophalen en vergeten. Herinneringen blijven bewaard tot je vraagt ze te vergeten.",
+          "enable_read_url_tool": "Optioneel. Als zoeken op internet ook aan staat, kan de assistent een link openen en de hoofdtekst van de pagina lezen. Menu's, koppen en voetteksten blijven weg. Zet dit uit als pagina's niet geopend mogen worden. Geldt voor elke assistent.",
           "searxng_url": "Basis-URL van je SearXNG-instantie (bijvoorbeeld http://192.168.11.102:8888). Wordt gebruikt wanneer Webzoekopdracht op SearXNG staat."
         }
       },

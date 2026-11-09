@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Abilita strumenti personalizzati esterni",
           "enable_calculator_tools": "Abilita strumenti calcolatrice",
           "enable_unit_conversion_tools": "Abilita strumenti di conversione delle unità",
+          "enable_read_url_tool": "Leggere una pagina web",
           "enable_memory_tools": "Abilita strumenti di memoria persistente",
           "searxng_url": "URL SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Consente all'assistente di ricordare, recuperare e dimenticare fatti e preferenze approvati dall'utente. I ricordi vengono conservati finché non ne chiedi la rimozione.",
+          "enable_read_url_tool": "Facoltativo. Se la ricerca web è attiva, l'assistente può aprire un link e leggere il testo principale della pagina. Menu, intestazioni e piè di pagina vengono esclusi. Disattivalo se non vuoi che le pagine vengano aperte. Condiviso da tutti gli assistenti.",
           "searxng_url": "URL di base della tua istanza SearXNG (ad esempio http://192.168.11.102:8888). Usato quando la ricerca web è impostata su SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Abilita strumenti personalizzati esterni",
           "enable_calculator_tools": "Abilita strumenti calcolatrice",
           "enable_unit_conversion_tools": "Abilita strumenti di conversione delle unità",
+          "enable_read_url_tool": "Leggere una pagina web",
           "enable_memory_tools": "Abilita strumenti di memoria persistente",
           "searxng_url": "URL SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Consente all'assistente di ricordare, recuperare e dimenticare fatti e preferenze approvati dall'utente. I ricordi vengono conservati finché non ne chiedi la rimozione.",
+          "enable_read_url_tool": "Facoltativo. Se la ricerca web è attiva, l'assistente può aprire un link e leggere il testo principale della pagina. Menu, intestazioni e piè di pagina vengono esclusi. Disattivalo se non vuoi che le pagine vengano aperte. Condiviso da tutti gli assistenti.",
           "searxng_url": "URL di base della tua istanza SearXNG (ad esempio http://192.168.11.102:8888). Usato quando la ricerca web è impostata su SearXNG."
         }
       },

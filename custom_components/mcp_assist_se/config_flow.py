@@ -69,6 +69,7 @@ from .const import (
     EMBEDDING_PROVIDER_OPENAI,
     CONF_ENABLE_CALCULATOR_TOOLS,
     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
+    CONF_ENABLE_READ_URL_TOOL,
     CONF_BRAVE_API_KEY,
     CONF_ALLOWED_IPS,
     CONF_SEARCH_PROVIDER,
@@ -131,6 +132,7 @@ from .const import (
     DEFAULT_ENABLE_MEMORY_TOOLS,
     DEFAULT_ENABLE_CALCULATOR_TOOLS,
     DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+    DEFAULT_ENABLE_READ_URL_TOOL,
     DEFAULT_BRAVE_API_KEY,
     DEFAULT_ALLOWED_IPS,
     DEFAULT_SEARCH_PROVIDER,
@@ -1091,6 +1093,10 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 CONF_ENABLE_UNIT_CONVERSION_TOOLS,
                                 DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
                             ),
+                            CONF_ENABLE_READ_URL_TOOL: existing_entry.data.get(
+                                CONF_ENABLE_READ_URL_TOOL,
+                                DEFAULT_ENABLE_READ_URL_TOOL,
+                            ),
                         }
 
                     # Combine data from steps 1-4 + shared settings
@@ -1324,6 +1330,16 @@ class MCPAssistConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_ENABLE_UNIT_CONVERSION_TOOLS,
                     default=DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_READ_URL_TOOL,
+                    default=sys_options.get(
+                        CONF_ENABLE_READ_URL_TOOL,
+                        sys_data.get(
+                            CONF_ENABLE_READ_URL_TOOL,
+                            DEFAULT_ENABLE_READ_URL_TOOL,
+                        ),
+                    ),
                 ): bool,
                 vol.Optional(
                     CONF_ENABLE_MEMORY_TOOLS,
@@ -2054,6 +2070,16 @@ class MCPAssistOptionsFlow(AccessOptionsMixin, config_entries.OptionsFlow):
                         sys_data.get(
                             CONF_ENABLE_UNIT_CONVERSION_TOOLS,
                             DEFAULT_ENABLE_UNIT_CONVERSION_TOOLS,
+                        ),
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_READ_URL_TOOL,
+                    default=sys_options.get(
+                        CONF_ENABLE_READ_URL_TOOL,
+                        sys_data.get(
+                            CONF_ENABLE_READ_URL_TOOL,
+                            DEFAULT_ENABLE_READ_URL_TOOL,
                         ),
                     ),
                 ): bool,

@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Activer les outils personnalisés externes",
           "enable_calculator_tools": "Activer les outils de calculatrice",
           "enable_unit_conversion_tools": "Activer les outils de conversion d'unités",
+          "enable_read_url_tool": "Lire une page web",
           "enable_memory_tools": "Activer les outils de mémoire persistante",
           "searxng_url": "URL SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Permet à l'assistant de mémoriser, de retrouver et d'oublier les faits et préférences approuvés par l'utilisateur. Les souvenirs sont conservés jusqu'à ce que vous demandiez leur oubli.",
+          "enable_read_url_tool": "Facultatif. Si la recherche web est aussi activée, l'assistant peut ouvrir un lien et lire le texte principal de la page. Les menus, en-têtes et pieds de page sont ignorés. Désactivez-le si vous ne voulez pas que des pages soient ouvertes. Commun à tous les assistants.",
           "searxng_url": "URL de base de votre instance SearXNG (par exemple http://192.168.11.102:8888). Utilisée lorsque la recherche Web est réglée sur SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Activer les outils personnalisés externes",
           "enable_calculator_tools": "Activer les outils de calculatrice",
           "enable_unit_conversion_tools": "Activer les outils de conversion d'unités",
+          "enable_read_url_tool": "Lire une page web",
           "enable_memory_tools": "Activer les outils de mémoire persistante",
           "searxng_url": "URL SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Permet à l'assistant de mémoriser, de retrouver et d'oublier les faits et préférences approuvés par l'utilisateur. Les souvenirs sont conservés jusqu'à ce que vous demandiez leur oubli.",
+          "enable_read_url_tool": "Facultatif. Si la recherche web est aussi activée, l'assistant peut ouvrir un lien et lire le texte principal de la page. Les menus, en-têtes et pieds de page sont ignorés. Désactivez-le si vous ne voulez pas que des pages soient ouvertes. Commun à tous les assistants.",
           "searxng_url": "URL de base de votre instance SearXNG (par exemple http://192.168.11.102:8888). Utilisée lorsque la recherche Web est réglée sur SearXNG."
         }
       },

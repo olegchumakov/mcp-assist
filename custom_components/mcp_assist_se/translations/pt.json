@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "Ativar ferramentas personalizadas externas",
           "enable_calculator_tools": "Ativar ferramentas de calculadora",
           "enable_unit_conversion_tools": "Ativar ferramentas de conversão de unidades",
+          "enable_read_url_tool": "Ler uma página web",
           "enable_memory_tools": "Ativar ferramentas de memória persistente",
           "searxng_url": "URL do SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Permite ao assistente memorizar, recuperar e esquecer factos e preferências aprovados pelo utilizador. As memórias são mantidas até pedir para as esquecer.",
+          "enable_read_url_tool": "Opcional. Com a pesquisa na web também ligada, o assistente pode abrir um link e ler o texto principal da página. Menus, cabeçalhos e rodapés ficam de fora. Desligue se não quiser que páginas sejam abertas. Vale para todos os assistentes.",
           "searxng_url": "URL base da sua instância SearXNG (por exemplo, http://192.168.11.102:8888). Usado quando a pesquisa Web está definida como SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "Ativar ferramentas personalizadas externas",
           "enable_calculator_tools": "Ativar ferramentas de calculadora",
           "enable_unit_conversion_tools": "Ativar ferramentas de conversão de unidades",
+          "enable_read_url_tool": "Ler uma página web",
           "enable_memory_tools": "Ativar ferramentas de memória persistente",
           "searxng_url": "URL do SearXNG"
         },
         "data_description": {
           "enable_memory_tools": "Permite ao assistente memorizar, recuperar e esquecer factos e preferências aprovados pelo utilizador. As memórias são mantidas até pedir para as esquecer.",
+          "enable_read_url_tool": "Opcional. Com a pesquisa na web também ligada, o assistente pode abrir um link e ler o texto principal da página. Menus, cabeçalhos e rodapés ficam de fora. Desligue se não quiser que páginas sejam abertas. Vale para todos os assistentes.",
           "searxng_url": "URL base da sua instância SearXNG (por exemplo, http://192.168.11.102:8888). Usado quando a pesquisa Web está definida como SearXNG."
         }
       },

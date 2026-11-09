@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "外部カスタムツールを有効にする",
           "enable_calculator_tools": "電卓ツールを有効にする",
           "enable_unit_conversion_tools": "単位変換ツールを有効にする",
+          "enable_read_url_tool": "ウェブページを読む",
           "enable_memory_tools": "永続メモリーツールを有効にする",
           "searxng_url": "SearXNG URL"
         },
         "data_description": {
           "enable_memory_tools": "承認された事実や好みをアシスタントが記憶・呼び出し・削除できるようにします。記憶は忘れるよう依頼するまで保持されます。",
+          "enable_read_url_tool": "任意です。ウェブ検索もオンのとき、アシスタントはリンクを開いてページの本文を読めます。メニュー、ヘッダー、フッターは除きます。ページを開かせたくないときはオフにしてください。すべてのアシスタントで共通です。",
           "searxng_url": "SearXNG インスタンスのベース URL（例: http://192.168.11.102:8888）。Web 検索を SearXNG に設定した場合に使用します。"
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "外部カスタムツールを有効にする",
           "enable_calculator_tools": "電卓ツールを有効にする",
           "enable_unit_conversion_tools": "単位変換ツールを有効にする",
+          "enable_read_url_tool": "ウェブページを読む",
           "enable_memory_tools": "永続メモリーツールを有効にする",
           "searxng_url": "SearXNG URL"
         },
         "data_description": {
           "enable_memory_tools": "承認された事実や好みをアシスタントが記憶・呼び出し・削除できるようにします。記憶は忘れるよう依頼するまで保持されます。",
+          "enable_read_url_tool": "任意です。ウェブ検索もオンのとき、アシスタントはリンクを開いてページの本文を読めます。メニュー、ヘッダー、フッターは除きます。ページを開かせたくないときはオフにしてください。すべてのアシスタントで共通です。",
           "searxng_url": "SearXNG インスタンスのベース URL（例: http://192.168.11.102:8888）。Web 検索を SearXNG に設定した場合に使用します。"
         }
       },

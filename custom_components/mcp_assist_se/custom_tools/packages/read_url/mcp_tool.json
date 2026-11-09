@@ -2,12 +2,12 @@
   "schema_version": 1,
   "id": "read_url",
   "name": "Read URL",
-  "description": "Built-in URL content reader for web search follow-up flows.",
+  "description": "Opens a web address and reads the main text of that page.",
   "version": "1.1.0",
   "entrypoint": "tool:ReadUrlPackageTool",
   "prompt_append_file": "prompt.md",
   "capabilities": [
-    "Fetches and extracts page text from a URL so the assistant can inspect a specific search result."
+    "Opens a web address and reads the main text, leaving out menus, headers, and footers."
   ],
   "built_in_toggle": {
     "tool_names": [
@@ -17,10 +17,10 @@
     "profile_setting_key": "profile_enable_read_url_tool",
     "shared_default": true,
     "profile_default": true,
-    "shared_label": "Read URL",
-    "profile_disable_label": "Disable Read URL",
-    "shared_description": "Expose URL reading so the assistant can inspect specific web pages.",
-    "profile_disable_description": "Prevents this profile from opening and extracting page content from URLs.",
+    "shared_label": "Read a web page",
+    "profile_disable_label": "Do not read web pages",
+    "shared_description": "Optional. When web search is also on, the assistant can open a link and read the main text of that page. Menus, headers, and footers are left out. Turn this off if you do not want pages opened. Shared by every assistant.",
+    "profile_disable_description": "Optional. Tick this to stop this assistant from opening web pages. Other assistants are not changed. Leave it unticked to keep page reading on.",
     "legacy_shared_setting_keys": [
       "enable_web_search"
     ],

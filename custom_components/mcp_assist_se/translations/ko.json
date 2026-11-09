@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "외부 사용자 지정 도구 사용",
           "enable_calculator_tools": "계산기 도구 사용",
           "enable_unit_conversion_tools": "단위 변환 도구 사용",
+          "enable_read_url_tool": "웹페이지 읽기",
           "enable_memory_tools": "영구 메모리 도구 사용",
           "searxng_url": "SearXNG URL"
         },
         "data_description": {
           "enable_memory_tools": "사용자가 승인한 사실과 선호를 어시스턴트가 기억, 불러오기, 삭제할 수 있게 합니다. 메모리는 잊어달라고 요청할 때까지 유지됩니다.",
+          "enable_read_url_tool": "선택 사항입니다. 웹 검색도 켜져 있으면 어시스턴트가 링크를 열어 페이지의 본문을 읽습니다. 메뉴, 머리글, 바닥글은 제외합니다. 페이지를 열지 않으려면 끄세요. 모든 어시스턴트가 함께 씁니다.",
           "searxng_url": "SearXNG 인스턴스의 기본 URL(예: http://192.168.11.102:8888). 웹 검색이 SearXNG로 설정된 경우 사용됩니다."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "외부 사용자 지정 도구 사용",
           "enable_calculator_tools": "계산기 도구 사용",
           "enable_unit_conversion_tools": "단위 변환 도구 사용",
+          "enable_read_url_tool": "웹페이지 읽기",
           "enable_memory_tools": "영구 메모리 도구 사용",
           "searxng_url": "SearXNG URL"
         },
         "data_description": {
           "enable_memory_tools": "사용자가 승인한 사실과 선호를 어시스턴트가 기억, 불러오기, 삭제할 수 있게 합니다. 메모리는 잊어달라고 요청할 때까지 유지됩니다.",
+          "enable_read_url_tool": "선택 사항입니다. 웹 검색도 켜져 있으면 어시스턴트가 링크를 열어 페이지의 본문을 읽습니다. 메뉴, 머리글, 바닥글은 제외합니다. 페이지를 열지 않으려면 끄세요. 모든 어시스턴트가 함께 씁니다.",
           "searxng_url": "SearXNG 인스턴스의 기본 URL(예: http://192.168.11.102:8888). 웹 검색이 SearXNG로 설정된 경우 사용됩니다."
         }
       },

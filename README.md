@@ -122,6 +122,17 @@ Speech-to-text that recognizes who is speaking puts that person's name at the fr
 
 The name stays in front of every other sentence, so the assistant can still tell people apart. A period or an exclamation mark right after the stop word is ignored. When the transcript is only the name, the conversation continues as usual.
 
+## Commands in order, and only devices the assistant may use (v0.25.0)
+
+- **Commands that change something happen one after another.** If you ask to turn off the kitchen light and then the hall light, the second command waits until the first has been sent. Looking things up can still happen at the same time: which lights are on, what a page says, what the assistant remembers. Those do not change anything, so they do not have to wait.
+- **The assistant only controls what you have exposed to Assist.** In Home Assistant that is Settings → Voice assistants → Expose. Naming one hidden entity is refused, and asking for "all" is refused. Naming a physical device or a room controls the exposed entities of that kind there: a light command turns the exposed light and leaves a hidden temperature or diagnostic reading on the same device alone. If nothing exposed matches, the command is not sent. Your per-person limits, if you turned those on, still apply as well.
+- **A device can be named directly.** The assistant may pass the Home Assistant name on its own, such as `light.kitchen`, instead of wrapping it. The older wrapped form still works.
+- **Finding devices is less easily confused.** A question about the hallway is no longer treated as a question about everything, just because "hallway" contains the letters "all". A device in a room is searched by both the room and the name. Asking for every kind of device searches every kind. If nothing matches, the assistant is told why, so it can try a simpler search. When per-person limits are on, that explanation does not list every room in the house.
+- **Opening a web page reads the article, not the menu.** The switch is called **Read a web page**. It is optional, and it is on unless you turn it off. It only works when web search is also on. The assistant keeps the main text and leaves out menus, headers, and footers. The setting is shared by every assistant.
+- **Private notes are not spoken.** Some models write notes between `<think>` and `</think>` before the answer. Those notes are removed before the reply is shown or spoken, including when the model forgets to close the note.
+
+The current time in the prompt is still the real clock time, with hours, minutes, and seconds. The assistant turns that into words itself.
+
 ## Multilingual Support (v0.12.0+)
 
 MCP Assist supports **21 languages** with localized configuration interfaces, language-aware system prompts, and region-specific speech detection patterns. The integration automatically detects your Home Assistant system language and provides appropriate defaults for system prompts, follow-up phrases, and end conversation words. Supported languages include: Arabic, Chinese (Simplified), Czech, Danish, Dutch, Finnish, Filipino, French, German, Greek, Hindi, Italian, Japanese, Korean, Norwegian, Polish, Portuguese, Russian, Spanish, Swedish, and Turkish.
@@ -251,8 +262,8 @@ Version 0.22.0 records conversation tool results with the Home Assistant 2026.10
 ```
 1. LLM calls discover_entities(name_contains="water main")
    → Returns: switch.water_main_shutoff
-2. LLM calls perform_action(entity_id="switch.water_main_shutoff", action="turn_off")
-   → Success
+2. LLM calls perform_action(domain="switch", action="turn_off", entity_id="switch.water_main_shutoff")
+   → The device must be exposed to Assist. The result says whether it changed.
 ```
 
 **Assistant**: "I've shut off the main water valve."
@@ -306,6 +317,7 @@ Temperature controls response randomness (0.0 = deterministic, 1.0 = creative). 
 - **MCP Server Port**: Default 8090 (change if port conflict)
 - **Additional Allowed IPs/Ranges**: Whitelist Docker containers (e.g., `172.30.0.0/16`) or specific IPs for external MCP clients like Claude Code add-on
 - **Wait for slow devices (seconds)**: The longest time the assistant waits for a device to confirm a command, such as a TV that takes a few seconds to turn on. Default 10, range 2-30. Fast devices answer as soon as they report. If time runs out, the assistant says the command was sent rather than that it failed.
+- **Read a web page**: Optional. On unless you turn it off. When web search is also on, the assistant can open a link and read the main text of that page. Menus, headers, and footers are left out. Turn it off if you do not want pages opened. Shared by every assistant.
 
 ### Web Search
 - **Web Search Provider**: Choose between:

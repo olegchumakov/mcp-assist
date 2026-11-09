@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "I-enable ang external custom tools",
           "enable_calculator_tools": "I-enable ang calculator tools",
           "enable_unit_conversion_tools": "I-enable ang unit conversion tools",
+          "enable_read_url_tool": "Basahin ang web page",
           "enable_memory_tools": "I-enable ang persistent memory tools",
           "searxng_url": "SearXNG URL"
         },
         "data_description": {
           "enable_memory_tools": "Nagpapahintulot sa assistant na matandaan, makuha, at kalimutan ang mga fact at preference na inaprubahan ng user. Nananatili ang mga memory hanggang sabihin mong kalimutan ang mga ito.",
+          "enable_read_url_tool": "Opsyonal. Kapag naka-on din ang paghahanap sa web, mababasa ng assistant ang pangunahing teksto ng isang pahina. Hindi kasama ang menu, header, at footer. I-off ito kung ayaw mong buksan ang mga pahina. Pareho para sa lahat ng assistant.",
           "searxng_url": "Base URL ng iyong SearXNG instance (halimbawa, http://192.168.11.102:8888). Ginagamit kapag nakatakda ang Web Search sa SearXNG."
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "I-enable ang external custom tools",
           "enable_calculator_tools": "I-enable ang calculator tools",
           "enable_unit_conversion_tools": "I-enable ang unit conversion tools",
+          "enable_read_url_tool": "Basahin ang web page",
           "enable_memory_tools": "I-enable ang persistent memory tools",
           "searxng_url": "SearXNG URL"
         },
         "data_description": {
           "enable_memory_tools": "Nagpapahintulot sa assistant na matandaan, makuha, at kalimutan ang mga fact at preference na inaprubahan ng user. Nananatili ang mga memory hanggang sabihin mong kalimutan ang mga ito.",
+          "enable_read_url_tool": "Opsyonal. Kapag naka-on din ang paghahanap sa web, mababasa ng assistant ang pangunahing teksto ng isang pahina. Hindi kasama ang menu, header, at footer. I-off ito kung ayaw mong buksan ang mga pahina. Pareho para sa lahat ng assistant.",
           "searxng_url": "Base URL ng iyong SearXNG instance (halimbawa, http://192.168.11.102:8888). Ginagamit kapag nakatakda ang Web Search sa SearXNG."
         }
       },

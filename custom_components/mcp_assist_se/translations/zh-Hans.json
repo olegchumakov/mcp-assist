@@ -70,11 +70,13 @@
           "enable_external_custom_tools": "启用外部自定义工具",
           "enable_calculator_tools": "启用计算器工具",
           "enable_unit_conversion_tools": "启用单位换算工具",
+          "enable_read_url_tool": "阅读网页",
           "enable_memory_tools": "启用持久记忆工具",
           "searxng_url": "SearXNG URL"
         },
         "data_description": {
           "enable_memory_tools": "允许助手记住、回忆和忘记用户认可的事实与偏好。记忆会一直保留，直到您要求忘记。",
+          "enable_read_url_tool": "可选。网页搜索也打开时，助手可以打开链接并阅读页面正文。菜单、页眉和页脚会被略过。如果不希望打开网页，请关闭。所有助手共用此设置。",
           "searxng_url": "您的 SearXNG 实例的基础 URL（例如 http://192.168.11.102:8888）。当 Web 搜索设置为 SearXNG 时使用。"
         }
       },
@@ -154,11 +156,13 @@
           "enable_external_custom_tools": "启用外部自定义工具",
           "enable_calculator_tools": "启用计算器工具",
           "enable_unit_conversion_tools": "启用单位换算工具",
+          "enable_read_url_tool": "阅读网页",
           "enable_memory_tools": "启用持久记忆工具",
           "searxng_url": "SearXNG URL"
         },
         "data_description": {
           "enable_memory_tools": "允许助手记住、回忆和忘记用户认可的事实与偏好。记忆会一直保留，直到您要求忘记。",
+          "enable_read_url_tool": "可选。网页搜索也打开时，助手可以打开链接并阅读页面正文。菜单、页眉和页脚会被略过。如果不希望打开网页，请关闭。所有助手共用此设置。",
           "searxng_url": "您的 SearXNG 实例的基础 URL（例如 http://192.168.11.102:8888）。当 Web 搜索设置为 SearXNG 时使用。"
         }
       },
