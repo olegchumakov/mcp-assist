@@ -27,6 +27,7 @@ if "mcp_assist_se" not in sys.modules:
 from mcp_assist_se.action_args import (  # noqa: E402
     explicit_entity_ids,
     exposure_refusal_text,
+    finalize_action_entities,
     normalize_action_arguments,
     unexposed_entity_ids,
 )
@@ -243,6 +244,66 @@ class PerformActionArgumentTests(unittest.TestCase):
         text = exposure_refusal_text(["all"], ["all"])
         self.assertIn("all", text.lower())
         self.assertIn("not allowed", text)
+        chosen, refusal = finalize_action_entities(
+            explicit_ids=["all"],
+            group_ids=["light.bulb"],
+            is_exposed=lambda entity_id: True,
+            service_domain="light",
+            had_group_target=False,
+        )
+        self.assertEqual(chosen, [])
+        self.assertIn("not allowed", refusal)
+
+    def test_device_with_hidden_diagnostic_controls_the_exposed_light_only(self):
+        """A hidden sensor on the same device must not block or receive the command."""
+        exposed = {"light.bulb", "sensor.co2"}
+        chosen, refusal = finalize_action_entities(
+            explicit_ids=[],
+            group_ids=["light.bulb", "sensor.bulb_temperature", "sensor.co2"],
+            is_exposed=lambda entity_id: entity_id in exposed,
+            service_domain="light",
+            had_group_target=True,
+        )
+        self.assertEqual(refusal, "")
+        self.assertEqual(chosen, ["light.bulb"])
+        self.assertNotIn("sensor.bulb_temperature", chosen)
+        self.assertNotIn("sensor.co2", chosen)
+
+    def test_room_target_uses_the_same_exposed_domain_filter(self):
+        exposed = {"light.kitchen"}
+        chosen, refusal = finalize_action_entities(
+            explicit_ids=[],
+            group_ids=["light.kitchen", "sensor.kitchen_temperature"],
+            is_exposed=lambda entity_id: entity_id in exposed,
+            service_domain="light",
+            had_group_target=True,
+        )
+        self.assertEqual(refusal, "")
+        self.assertEqual(chosen, ["light.kitchen"])
+
+    def test_device_with_only_hidden_matching_entities_is_refused(self):
+        chosen, refusal = finalize_action_entities(
+            explicit_ids=[],
+            group_ids=["light.secret", "sensor.secret_diag"],
+            is_exposed=lambda entity_id: False,
+            service_domain="light",
+            had_group_target=True,
+        )
+        self.assertEqual(chosen, [])
+        self.assertIn("no exposed", refusal.lower())
+        self.assertNotIn("light.secret", refusal)
+        self.assertNotIn("sensor.secret_diag", refusal)
+
+    def test_naming_a_hidden_entity_is_still_refused(self):
+        chosen, refusal = finalize_action_entities(
+            explicit_ids=["light.secret"],
+            group_ids=["light.bulb"],
+            is_exposed=lambda entity_id: entity_id == "light.bulb",
+            service_domain="light",
+            had_group_target=True,
+        )
+        self.assertEqual(chosen, [])
+        self.assertIn("light.secret", refusal)
 
 
 class DiscoveryFilterTests(unittest.TestCase):

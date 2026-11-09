@@ -26,10 +26,9 @@ from homeassistant.util import dt as dt_util
 
 from .action_args import (
     explicit_entity_ids,
-    exposure_refusal_text,
+    finalize_action_entities,
     merge_ids,
     normalize_action_arguments,
-    unexposed_entity_ids,
 )
 from .access_control import (
     authorize_action,
@@ -1949,7 +1948,7 @@ class MCPServer:
                                 {"type": "string"},
                                 {"type": "array", "items": {"type": "string"}},
                             ],
-                            "description": "Entity ID or list of entity IDs to control. Optional when target is set. Only entities exposed to Assist can be controlled.",
+                            "description": "Entity ID or list of entity IDs to control. Optional when target is set. A named entity must be exposed to Assist. A device or area in target is limited to the exposed entities of this domain; hidden entities on that device are left alone.",
                         },
                         "target": {
                             "type": "object",
@@ -2753,6 +2752,7 @@ class MCPServer:
         # in before access control so both paths see the same devices.
         target, data = normalize_action_arguments(args)
         requested_entity_ids = explicit_entity_ids(target)
+        had_group_target = bool(target.get("device_id") or target.get("area_id"))
 
         # Validate required parameters
         if not domain:
@@ -2814,33 +2814,46 @@ class MCPServer:
             return {"content": [{"type": "text", "text": f"❌ Error: {error_msg}"}]}
 
         # Voice-access limits already ran. This is the separate Assist expose
-        # gate: a hidden entity cannot be controlled by id, by device, or by
-        # a copy of the id inside data. Action verification still runs after.
+        # gate. A named entity must itself be exposed. A device or room is
+        # narrowed to the exposed entities of this action's domain, and the
+        # service is called with those ids only, so a hidden diagnostic on
+        # the same device is never acted on. Action verification still runs
+        # after.
         if not isinstance(resolved_target, dict):
             resolved_target = {}
-        device_entities = resolved_target.pop("_device_entity_ids", [])
+        device_entities = resolved_target.pop("_device_entity_ids", []) or []
+        area_entities = resolved_target.pop("_area_entity_ids", []) or []
+        resolved_target.pop("device_id", None)
+        resolved_target.pop("area_id", None)
+        # A tightened per-person grant replaces a device or room with the
+        # entity ids that person may use. Those are group targets too.
+        access_added = [
+            entity_id
+            for entity_id in explicit_entity_ids(resolved_target)
+            if entity_id not in requested_entity_ids
+        ]
+        group_ids = merge_ids(merge_ids(device_entities, area_entities), access_added)
         _LOGGER.debug("Resolved target: %s", resolved_target)
-        check_ids = merge_ids(resolved_target.get("entity_id"), device_entities)
-        refused = unexposed_entity_ids(
-            check_ids,
-            lambda entity_id: async_should_expose(
+        chosen, refusal_text = finalize_action_entities(
+            explicit_ids=requested_entity_ids,
+            group_ids=group_ids,
+            is_exposed=lambda entity_id: async_should_expose(
                 self.hass, "conversation", entity_id
             ),
+            service_domain=str(domain or ""),
+            had_group_target=had_group_target,
         )
-        if refused:
+        if refusal_text:
             _LOGGER.warning(
                 "Refused action on entities not exposed to Assist: %s",
-                _sanitize_log_value(refused, 200),
+                _sanitize_log_value(refusal_text, 200),
             )
             return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": exposure_refusal_text(refused, requested_entity_ids),
-                    }
-                ],
+                "content": [{"type": "text", "text": refusal_text}],
                 "isError": True,
             }
+        if chosen:
+            resolved_target = {"entity_id": chosen}
 
         # Deprecated color_temp (mireds) was removed from light.turn_on in HA
         # 2026.3. Auto-convert instead of rejecting so the LLM doesn't need a
@@ -3551,18 +3564,13 @@ class MCPServer:
                 area_entities.extend([e["entity_id"] for e in entities])
                 _LOGGER.debug(f"Found {len(entities)} entities in area '{area_id}'")
 
-            if area_entities:
-                if "entity_id" in resolved:
-                    # Merge with existing entity_ids
-                    existing = resolved["entity_id"]
-                    resolved["entity_id"] = list(set(existing + area_entities))
-                else:
-                    resolved["entity_id"] = area_entities
+            # Kept apart from named entity ids so a hidden entity in the room
+            # can be dropped without refusing an exposed one.
+            resolved["_area_entity_ids"] = area_entities
 
-        # Expand device_id so each entity can be exposure-checked. The device
-        # id itself is kept: that is what Home Assistant receives, so a device
-        # with many entities is not cut off by the per-call confirmation limit.
-        # _device_entity_ids is removed before the service call.
+        # Expand device_id for the exposure filter. The device id is not
+        # passed on: Home Assistant would act on every entity of that device,
+        # including ones hidden from Assist.
         if "device_id" in target:
             device_ids = target["device_id"]
             if isinstance(device_ids, str):
@@ -3585,9 +3593,6 @@ class MCPServer:
             _LOGGER.debug(
                 "Found %d entities for devices %s", len(device_entities), device_ids
             )
-            if not device_entities and "entity_id" not in resolved:
-                raise ValueError("No entities found for that device")
-            resolved["device_id"] = device_ids
             resolved["_device_entity_ids"] = device_entities
 
         return resolved if resolved else target

@@ -77,6 +77,83 @@ def unexposed_entity_ids(
     return refused
 
 
+def entity_domain(entity_id: str) -> str:
+    """Domain prefix of an entity id, or empty when it has none."""
+    if not isinstance(entity_id, str) or "." not in entity_id:
+        return ""
+    return entity_id.split(".", 1)[0]
+
+
+def matches_service_domain(entity_id: str, service_domain: str) -> bool:
+    """True when this entity is the kind of device the action controls.
+
+    ``homeassistant`` actions, such as turn_on, apply to every domain.
+    """
+    if service_domain == "homeassistant":
+        return True
+    return entity_domain(entity_id) == service_domain
+
+
+def group_target_refusal_text(service_domain: str) -> str:
+    """Refusal when a device or room has no exposed entity of this kind."""
+    kind = service_domain if service_domain and service_domain != "homeassistant" else "matching"
+    return (
+        "❌ Error: no exposed "
+        f"{kind} entities were found for that device or room, "
+        "so the command was not sent."
+    )
+
+
+def finalize_action_entities(
+    *,
+    explicit_ids: list[str],
+    group_ids: list[str],
+    is_exposed: Callable[[str], bool],
+    service_domain: str,
+    had_group_target: bool,
+) -> tuple[list[str], str]:
+    """Choose the entities a perform_action call may control.
+
+    An entity id the caller named must itself be exposed. ``all`` is refused.
+    A device or room contributes only entities that are exposed and match the
+    action's domain. Hidden entities are never returned. When the device or
+    room was the target and nothing exposed matches, the call is refused.
+    """
+    if any(
+        isinstance(entity_id, str) and entity_id.lower() in _BROAD_ENTITY_IDS
+        for entity_id in explicit_ids
+    ):
+        broad = [
+            entity_id
+            for entity_id in explicit_ids
+            if isinstance(entity_id, str) and entity_id.lower() in _BROAD_ENTITY_IDS
+        ]
+        return [], exposure_refusal_text(broad or ["all"], explicit_ids)
+
+    hidden_named = unexposed_entity_ids(explicit_ids, is_exposed)
+    if hidden_named:
+        return [], exposure_refusal_text(hidden_named, explicit_ids)
+
+    selected_group: list[str] = []
+    for entity_id in group_ids:
+        if not isinstance(entity_id, str) or not entity_id:
+            continue
+        if entity_id.lower() in _BROAD_ENTITY_IDS:
+            continue
+        if not matches_service_domain(entity_id, service_domain):
+            continue
+        if not is_exposed(entity_id):
+            continue
+        if entity_id not in selected_group:
+            selected_group.append(entity_id)
+
+    # A named id stays ahead of the same id found on the device or in the room.
+    chosen = merge_ids(explicit_ids, selected_group)
+    if had_group_target and not chosen:
+        return [], group_target_refusal_text(service_domain)
+    return chosen, ""
+
+
 def exposure_refusal_text(refused: list[str], requested: list[str]) -> str:
     """Tell the model the command was not sent.
 

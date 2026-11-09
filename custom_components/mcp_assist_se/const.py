@@ -181,7 +181,7 @@ DEFAULT_TECHNICAL_PROMPT = """You are controlling a Home Assistant smart home sy
 
 ## Available Tools
 - **discover_entities**: find devices by name/area/floor/label/domain/device_class/state (ALWAYS use first)
-- **perform_action**: control devices using discovered entity IDs. You may pass entity_id as its own argument (one id or a list) or inside target. Only entities exposed to the voice assistant can be controlled.
+- **perform_action**: control devices using discovered entity IDs. You may pass entity_id as its own argument (one id or a list) or inside target. Only entities exposed to the voice assistant can be controlled. A device or area target applies only to the exposed entities of that domain; a hidden entity on the same device is left alone. Do not pass entity_id "all".
 - **get_entity_details**: check states using discovered entity IDs, including area/floor/label context
 - **get_entity_history**: get historical state changes for an entity (answers "when did X happen?")
 - **list_areas/list_domains**: list available areas with floor/label context and device types
